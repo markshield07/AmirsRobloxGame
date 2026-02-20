@@ -11,21 +11,23 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CombatConfig = require(Shared:WaitForChild("CombatConfig"))
 local NinjaData = require(Shared:WaitForChild("NinjaData"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local CombatAPI = require(Shared:WaitForChild("CombatAPI"))
 
 --------------------------------------------------------------------------------
 -- PLAYER STATE TRACKING
 --------------------------------------------------------------------------------
 
 -- Holds combat state for every player currently in a match
-local playerStates = {} -- [Player] = { health, stamina, combo, cooldowns, ... }
+local playerStates = {} -- [Player] = { health, stamina, combo, cooldowns, matchId, ... }
 
 -- Create a fresh combat state for a player
-local function createPlayerState(player, ninjaKey)
+local function createPlayerState(player, ninjaKey, matchId)
 	local ninja = NinjaData.GetNinja(ninjaKey) or NinjaData.FlameShadow
 
 	return {
 		Ninja = ninjaKey,
 		NinjaInfo = ninja,
+		MatchId = matchId,
 
 		-- Vitals
 		Health = CombatConfig.MaxHealth,
@@ -33,7 +35,7 @@ local function createPlayerState(player, ninjaKey)
 		UltimateCharge = 0,
 
 		-- M1 combo tracking
-		ComboIndex = 0,             -- which hit we're on (0 = ready)
+		ComboIndex = 0,
 		LastM1Time = 0,
 
 		-- Ability cooldowns: [abilitySlot] = time when usable again
@@ -52,17 +54,18 @@ local function createPlayerState(player, ninjaKey)
 	}
 end
 
--- Public: initialize a player for combat
-function InitPlayerCombat(player, ninjaKey)
-	playerStates[player] = createPlayerState(player, ninjaKey)
-	-- Send initial health/stamina to client
+--------------------------------------------------------------------------------
+-- COMBAT API (registered on shared module for MatchManager access)
+--------------------------------------------------------------------------------
+
+local function initPlayerCombat(player, ninjaKey, matchId)
+	playerStates[player] = createPlayerState(player, ninjaKey, matchId)
 	Remotes.Combat.HealthUpdate:FireClient(player, player, CombatConfig.MaxHealth, CombatConfig.MaxHealth)
 	Remotes.Combat.StaminaUpdate:FireClient(player, CombatConfig.Stamina.Max, CombatConfig.Stamina.Max)
 	Remotes.Combat.UltimateUpdate:FireClient(player, 0, CombatConfig.Ultimate.MaxCharge)
 end
 
--- Public: reset health/stamina for a new round (keep same ninja)
-function ResetPlayerCombat(player)
+local function resetPlayerCombat(player)
 	local state = playerStates[player]
 	if not state then return end
 
@@ -75,38 +78,37 @@ function ResetPlayerCombat(player)
 	state.IsDashing = false
 	state.IsUsingAbility = false
 	state.IsStunned = false
-	state.SpawnProtectionEnd = tick() + CombatConfig.Match.SpawnProtection
+	state.SpawnProtectionEnd = os.clock() + CombatConfig.Match.SpawnProtection
 
 	Remotes.Combat.HealthUpdate:FireClient(player, player, CombatConfig.MaxHealth, CombatConfig.MaxHealth)
 	Remotes.Combat.StaminaUpdate:FireClient(player, CombatConfig.Stamina.Max, CombatConfig.Stamina.Max)
 	Remotes.Combat.UltimateUpdate:FireClient(player, 0, CombatConfig.Ultimate.MaxCharge)
 end
 
-function RemovePlayerCombat(player)
+local function removePlayerCombat(player)
 	playerStates[player] = nil
 end
 
--- Make functions accessible to MatchManager via a shared table on the server
-local CombatAPI = {
-	InitPlayerCombat = InitPlayerCombat,
-	ResetPlayerCombat = ResetPlayerCombat,
-	RemovePlayerCombat = RemovePlayerCombat,
-}
+local function setPlayerMatchId(player, matchId)
+	local state = playerStates[player]
+	if state then
+		state.MatchId = matchId
+	end
+end
 
--- Store in a BindableEvent value so MatchManager can access it
-local apiHolder = Instance.new("BindableEvent")
-apiHolder.Name = "CombatAPI"
-apiHolder.Parent = script
--- We'll use module-style access via _G for simplicity in V1
--- (In production, use a proper module loader)
-_G.CombatAPI = CombatAPI
+-- Register on the shared CombatAPI module (no more _G!)
+CombatAPI.InitPlayerCombat = initPlayerCombat
+CombatAPI.ResetPlayerCombat = resetPlayerCombat
+CombatAPI.RemovePlayerCombat = removePlayerCombat
+CombatAPI.SetPlayerMatchId = setPlayerMatchId
+CombatAPI.IsReady = true
 
 --------------------------------------------------------------------------------
 -- HELPERS
 --------------------------------------------------------------------------------
 
 local function now()
-	return tick()
+	return os.clock()
 end
 
 local function getState(player)
@@ -126,14 +128,41 @@ local function isAlive(state)
 	return state and state.Health > 0
 end
 
--- Find opponent in the match (simple 2-player approach)
+-- Find opponent in the SAME match (fixes cross-match bug)
 local function getOpponent(player)
-	for otherPlayer, _ in pairs(playerStates) do
-		if otherPlayer ~= player then
+	local myState = playerStates[player]
+	if not myState then return nil end
+	local myMatchId = myState.MatchId
+
+	for otherPlayer, otherState in pairs(playerStates) do
+		if otherPlayer ~= player and otherState.MatchId == myMatchId then
 			return otherPlayer
 		end
 	end
 	return nil
+end
+
+-- Apply velocity impulse using LinearVelocity (modern Roblox API)
+local function applyVelocityImpulse(rootPart, velocity, duration)
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "ImpulseAttachment"
+	attachment.Parent = rootPart
+
+	local linearVelocity = Instance.new("LinearVelocity")
+	linearVelocity.Attachment0 = attachment
+	linearVelocity.VectorVelocity = velocity
+	linearVelocity.MaxForce = 50000
+	linearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
+	linearVelocity.Parent = rootPart
+
+	task.delay(duration, function()
+		if linearVelocity and linearVelocity.Parent then
+			linearVelocity:Destroy()
+		end
+		if attachment and attachment.Parent then
+			attachment:Destroy()
+		end
+	end)
 end
 
 -- Apply damage to a player (server authoritative)
@@ -149,7 +178,6 @@ local function applyDamage(attacker, victim, rawDamage, breaksBlock)
 	-- Check block
 	if victimState.IsBlocking then
 		if breaksBlock then
-			-- Block broken! Apply full damage and stun
 			victimState.IsBlocking = false
 			victimState.IsStunned = true
 			victimState.StunEndTime = now() + 0.5
@@ -167,7 +195,7 @@ local function applyDamage(attacker, victim, rawDamage, breaksBlock)
 		attackerState.UltimateCharge + actualDamage * CombatConfig.Ultimate.ChargePerDamageDealt
 	)
 
-	-- Charge ultimate for victim (getting hit also charges a bit)
+	-- Charge ultimate for victim
 	victimState.UltimateCharge = math.min(
 		CombatConfig.Ultimate.MaxCharge,
 		victimState.UltimateCharge + actualDamage * CombatConfig.Ultimate.ChargePerDamageTaken
@@ -191,7 +219,6 @@ local function applyDamage(attacker, victim, rawDamage, breaksBlock)
 
 	-- Check for KO
 	if victimState.Health <= 0 then
-		-- Fire a round end signal (MatchManager listens for this)
 		local matchEndEvent = game:GetService("ServerScriptService"):FindFirstChild("MatchKOEvent", true)
 		if matchEndEvent then
 			matchEndEvent:Fire(attacker, victim)
@@ -211,8 +238,7 @@ local function isInRange(attacker, victim, range)
 	local victimRoot = victimChar:FindFirstChild("HumanoidRootPart")
 	if not attackerRoot or not victimRoot then return false end
 
-	local distance = (attackerRoot.Position - victimRoot.Position).Magnitude
-	return distance <= range
+	return (attackerRoot.Position - victimRoot.Position).Magnitude <= range
 end
 
 -- Apply knockback to a character
@@ -226,19 +252,8 @@ local function applyKnockback(attacker, victim, force)
 	if not attackerRoot or not victimRoot then return end
 
 	local direction = (victimRoot.Position - attackerRoot.Position).Unit
-	-- Apply a short velocity push
-	local bodyVelocity = Instance.new("BodyVelocity")
-	bodyVelocity.Velocity = direction * force + Vector3.new(0, force * 0.3, 0)
-	bodyVelocity.MaxForce = Vector3.new(50000, 50000, 50000)
-	bodyVelocity.P = 10000
-	bodyVelocity.Parent = victimRoot
-
-	-- Clean up after a short time
-	task.delay(0.3, function()
-		if bodyVelocity and bodyVelocity.Parent then
-			bodyVelocity:Destroy()
-		end
-	end)
+	local velocity = direction * force + Vector3.new(0, force * 0.3, 0)
+	applyVelocityImpulse(victimRoot, velocity, 0.3)
 end
 
 --------------------------------------------------------------------------------
@@ -305,7 +320,7 @@ Remotes.Combat.Block.OnServerEvent:Connect(function(player, isBlocking)
 	if isBlocking then
 		if not canAct(state) then return end
 		state.IsBlocking = true
-		state.ComboIndex = 0 -- cancel combo
+		state.ComboIndex = 0
 	else
 		state.IsBlocking = false
 	end
@@ -324,8 +339,7 @@ Remotes.Combat.Dash.OnServerEvent:Connect(function(player, direction)
 	-- Check stamina
 	if state.Stamina < CombatConfig.Dash.StaminaCost then return end
 
-	-- Check cooldown (use simple time tracking)
-	-- We'll store dash cooldown in the state
+	-- Check cooldown
 	if state._dashCooldownEnd and now() < state._dashCooldownEnd then return end
 
 	-- Consume stamina
@@ -335,23 +349,17 @@ Remotes.Combat.Dash.OnServerEvent:Connect(function(player, direction)
 
 	Remotes.Combat.StaminaUpdate:FireClient(player, state.Stamina, CombatConfig.Stamina.Max)
 
-	-- Apply dash movement on server
+	-- Apply dash movement
 	state.IsDashing = true
 	local char = player.Character
 	if char then
 		local root = char:FindFirstChild("HumanoidRootPart")
 		if root then
 			local dashDir = typeof(direction) == "Vector3" and direction.Unit or root.CFrame.LookVector
-			local bodyVelocity = Instance.new("BodyVelocity")
-			bodyVelocity.Velocity = dashDir * (CombatConfig.Dash.Distance / CombatConfig.Dash.Duration)
-			bodyVelocity.MaxForce = Vector3.new(50000, 0, 50000)
-			bodyVelocity.P = 10000
-			bodyVelocity.Parent = root
+			local velocity = dashDir * (CombatConfig.Dash.Distance / CombatConfig.Dash.Duration)
+			applyVelocityImpulse(root, velocity, CombatConfig.Dash.Duration)
 
 			task.delay(CombatConfig.Dash.Duration, function()
-				if bodyVelocity and bodyVelocity.Parent then
-					bodyVelocity:Destroy()
-				end
 				state.IsDashing = false
 			end)
 		else
@@ -406,8 +414,7 @@ Remotes.Combat.UseAbility.OnServerEvent:Connect(function(player, slot)
 	-- Find opponent
 	local opponent = getOpponent(player)
 
-	-- Execute ability logic based on type
-	-- (This is simplified V1 — each ability just checks range and applies damage)
+	-- Execute ability logic (simplified V1)
 	local damage = ability.Damage or 0
 	local range = ability.Range or ability.DashDistance or ability.TeleportDistance or ability.MaxRange or 15
 	local breaksBlock = ability.BreaksBlock or false
@@ -415,12 +422,10 @@ Remotes.Combat.UseAbility.OnServerEvent:Connect(function(player, slot)
 	if opponent and damage > 0 and isInRange(player, opponent, range) then
 		applyDamage(player, opponent, damage, breaksBlock)
 
-		-- Apply knockback if ability has launch force
 		if ability.LaunchForce then
 			applyKnockback(player, opponent, ability.LaunchForce)
 		end
 
-		-- Apply stun if ability has stun
 		if ability.StunDuration then
 			local opponentState = getState(opponent)
 			if opponentState then
@@ -430,7 +435,7 @@ Remotes.Combat.UseAbility.OnServerEvent:Connect(function(player, slot)
 		end
 	end
 
-	-- Recovery time (brief lockout after ability)
+	-- Recovery time
 	local recoveryTime = 0.5
 	task.delay(recoveryTime, function()
 		if state then
@@ -440,7 +445,7 @@ Remotes.Combat.UseAbility.OnServerEvent:Connect(function(player, slot)
 end)
 
 --------------------------------------------------------------------------------
--- STAMINA REGENERATION (runs every frame via Heartbeat)
+-- STAMINA REGENERATION
 --------------------------------------------------------------------------------
 
 game:GetService("RunService").Heartbeat:Connect(function(dt)
@@ -448,7 +453,6 @@ game:GetService("RunService").Heartbeat:Connect(function(dt)
 
 	for player, state in pairs(playerStates) do
 		if not player.Parent then
-			-- Player left, clean up
 			playerStates[player] = nil
 			continue
 		end
@@ -472,7 +476,7 @@ game:GetService("RunService").Heartbeat:Connect(function(dt)
 			state.LastStaminaUse = currentTime
 			if state.Stamina <= 0 then
 				state.Stamina = 0
-				state.IsBlocking = false -- forced block break
+				state.IsBlocking = false
 			end
 			Remotes.Combat.StaminaUpdate:FireClient(player, state.Stamina, CombatConfig.Stamina.Max)
 		end
@@ -492,4 +496,4 @@ Players.PlayerRemoving:Connect(function(player)
 	playerStates[player] = nil
 end)
 
-print("[CombatHandler] Loaded")
+print("[CombatHandler] Loaded and registered CombatAPI")

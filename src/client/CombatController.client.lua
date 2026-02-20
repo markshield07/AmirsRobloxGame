@@ -31,7 +31,7 @@ local isInMatch = false
 --------------------------------------------------------------------------------
 
 local function now()
-	return tick()
+	return os.clock()
 end
 
 local function getMoveDirection()

@@ -343,9 +343,9 @@ local function startCooldownVisual(slot, duration)
 
 	-- Countdown timer
 	task.spawn(function()
-		local endTime = tick() + duration
-		while tick() < endTime do
-			local remaining = math.ceil(endTime - tick())
+		local endTime = os.clock() + duration
+		while os.clock() < endTime do
+			local remaining = math.ceil(endTime - os.clock())
 			cdLabel.Text = tostring(remaining)
 			task.wait(0.1)
 		end
@@ -403,23 +403,32 @@ Remotes.Match.RoundStart.OnClientEvent:Connect(function(roundNum, countdown)
 	end
 end)
 
-Remotes.Match.RoundEnd.OnClientEvent:Connect(function(winnerName, score1, score2)
+Remotes.Match.RoundEnd.OnClientEvent:Connect(function(winnerName, myScore, opponentScore)
 	local scoreLabel = getElement("ScoreLabel")
 	if scoreLabel then
-		scoreLabel.Text = score1 .. " - " .. score2
+		scoreLabel.Text = "You: " .. myScore .. " - " .. opponentScore
 	end
 	showAnnouncement(winnerName .. " wins the round!", 2)
 end)
 
-Remotes.Match.MatchEnd.OnClientEvent:Connect(function(winnerName, scores)
+Remotes.Match.MatchEnd.OnClientEvent:Connect(function(winnerName)
 	showAnnouncement(winnerName .. " WINS THE MATCH!", 3)
+
+	-- Reset queue state so button works correctly after match
+	isQueued = false
 
 	-- Show queue button again after a delay
 	task.delay(4, function()
-		local queueButton = getElement("QueueButton")
-		if queueButton then queueButton.Visible = true end
+		local queueBtn = getElement("QueueButton")
+		if queueBtn then
+			queueBtn.Visible = true
+			queueBtn.Text = "FIND MATCH"
+			queueBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 60)
+		end
 		local oppFrame = getElement("OpponentHealthFrame")
 		if oppFrame then oppFrame.Visible = false end
+		local scoreLabel = getElement("ScoreLabel")
+		if scoreLabel then scoreLabel.Text = "Round: 0 - 0" end
 	end)
 end)
 
