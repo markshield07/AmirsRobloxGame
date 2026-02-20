@@ -17,50 +17,68 @@ local CombatAPI = require(Shared:WaitForChild("CombatAPI"))
 -- CONFIGURATION
 --------------------------------------------------------------------------------
 
--- Arena spawn positions (read from ArenaBuilder attributes, with fallbacks)
-local function getArenaPositions()
-	local arena = game.Workspace:FindFirstChild("Arena")
-	if arena then
-		return {
-			SpawnA = Vector3.new(
-				arena:GetAttribute("SpawnA_X") or 200,
-				arena:GetAttribute("SpawnA_Y") or 6,
-				arena:GetAttribute("SpawnA_Z") or -20
-			),
-			SpawnB = Vector3.new(
-				arena:GetAttribute("SpawnB_X") or 200,
-				arena:GetAttribute("SpawnB_Y") or 6,
-				arena:GetAttribute("SpawnB_Z") or 20
-			),
-			Lobby = Vector3.new(
-				arena:GetAttribute("LobbySpawn_X") or 0,
-				arena:GetAttribute("LobbySpawn_Y") or 6,
-				arena:GetAttribute("LobbySpawn_Z") or 0
-			),
-		}
-	end
-	-- Fallback defaults
+-- Arena definitions: each arena has spawn positions read from ArenaBuilder attributes
+local LOBBY_SPAWN = Vector3.new(0, 1, 0)
+
+local arenaList = {} -- populated on init: { { Name, SpawnA, SpawnB }, ... }
+
+local function readArenaFolder(folderName, fallbackX)
+	local folder = game.Workspace:FindFirstChild(folderName)
+	if not folder then return nil end
 	return {
-		SpawnA = Vector3.new(200, 6, -20),
-		SpawnB = Vector3.new(200, 6, 20),
-		Lobby = Vector3.new(0, 6, 0),
+		Name = folderName,
+		SpawnA = Vector3.new(
+			folder:GetAttribute("SpawnA_X") or fallbackX,
+			folder:GetAttribute("SpawnA_Y") or 1,
+			folder:GetAttribute("SpawnA_Z") or -20
+		),
+		SpawnB = Vector3.new(
+			folder:GetAttribute("SpawnB_X") or fallbackX,
+			folder:GetAttribute("SpawnB_Y") or 1,
+			folder:GetAttribute("SpawnB_Z") or 20
+		),
 	}
 end
-
--- Immediate fallbacks so variables are never nil
-local ARENA_SPAWN_A = Vector3.new(200, 6, -20)
-local ARENA_SPAWN_B = Vector3.new(200, 6, 20)
-local LOBBY_SPAWN = Vector3.new(0, 6, 0)
 
 task.defer(function()
 	-- Wait briefly for ArenaBuilder to finish
 	task.wait(1)
-	local positions = getArenaPositions()
-	ARENA_SPAWN_A = positions.SpawnA
-	ARENA_SPAWN_B = positions.SpawnB
-	LOBBY_SPAWN = positions.Lobby
-	print("[MatchManager] Arena positions loaded:", ARENA_SPAWN_A, ARENA_SPAWN_B)
+
+	-- Read lobby spawn
+	local arenaFolder = game.Workspace:FindFirstChild("Arena")
+	if arenaFolder then
+		LOBBY_SPAWN = Vector3.new(
+			arenaFolder:GetAttribute("LobbySpawn_X") or 0,
+			arenaFolder:GetAttribute("LobbySpawn_Y") or 1,
+			arenaFolder:GetAttribute("LobbySpawn_Z") or 0
+		)
+	end
+
+	-- Register all arenas
+	local city = readArenaFolder("Arena", 200)
+	if city then table.insert(arenaList, city) end
+
+	local shadow = readArenaFolder("ShadowRealm", 400)
+	if shadow then table.insert(arenaList, shadow) end
+
+	print("[MatchManager] " .. #arenaList .. " arena(s) loaded:")
+	for _, a in ipairs(arenaList) do
+		print("  " .. a.Name .. ": " .. tostring(a.SpawnA) .. " / " .. tostring(a.SpawnB))
+	end
 end)
+
+-- Pick a random arena for a match. Returns { Name, SpawnA, SpawnB }
+local function pickArena()
+	if #arenaList == 0 then
+		-- Fallback if ArenaBuilder hasn't finished
+		return {
+			Name = "Arena",
+			SpawnA = Vector3.new(200, 1, -20),
+			SpawnB = Vector3.new(200, 1, 20),
+		}
+	end
+	return arenaList[math.random(1, #arenaList)]
+end
 
 --------------------------------------------------------------------------------
 -- STATE
@@ -209,6 +227,9 @@ startMatch = function(player1, player2)
 	local matchId = nextMatchId
 	nextMatchId = nextMatchId + 1
 
+	-- Pick a random arena for this match
+	local arena = pickArena()
+
 	local match = {
 		Id = matchId,
 		Player1 = player1,
@@ -216,13 +237,14 @@ startMatch = function(player1, player2)
 		Scores = { [player1] = 0, [player2] = 0 },
 		CurrentRound = 0,
 		IsActive = true,
+		Arena = arena, -- { Name, SpawnA, SpawnB }
 	}
 
 	activeMatches[matchId] = match
 	playerToMatch[player1] = matchId
 	playerToMatch[player2] = matchId
 
-	print("[MatchManager] Match #" .. matchId .. ": " .. player1.Name .. " vs " .. player2.Name)
+	print("[MatchManager] Match #" .. matchId .. ": " .. player1.Name .. " vs " .. player2.Name .. " @ " .. arena.Name)
 
 	-- Notify players (safe for bots) — includes own ninja key for client VFX
 	safeFireClient(Remotes.Match.MatchFound, player1, player2.Name, getNinjaSelection(player2), getNinjaSelection(player1))
@@ -256,9 +278,9 @@ startRound = function(match)
 
 	print("[MatchManager] Match #" .. match.Id .. " — Round " .. roundNum)
 
-	-- Teleport players to arena spawns
-	teleportPlayer(match.Player1, ARENA_SPAWN_A)
-	teleportPlayer(match.Player2, ARENA_SPAWN_B)
+	-- Teleport players to the match's arena spawns
+	teleportPlayer(match.Player1, match.Arena.SpawnA)
+	teleportPlayer(match.Player2, match.Arena.SpawnB)
 
 	-- Reset combat states for new round
 	CombatAPI.ResetPlayerCombat(match.Player1)
@@ -382,8 +404,9 @@ startPracticeMatch = function(player)
 	local playerNinja = getNinjaSelection(player)
 	local botNinja = pickBotNinja(playerNinja)
 
-	-- Spawn bot at arena spawn B
-	local botPlayer = CombatAPI.SpawnBot(botNinja, ARENA_SPAWN_B)
+	-- Pick arena for this practice match, spawn bot at that arena's spawn B
+	local arena = pickArena()
+	local botPlayer = CombatAPI.SpawnBot(botNinja, arena.SpawnB)
 
 	-- Register bot's ninja selection so startMatch uses the correct ninja
 	playerNinjaSelection[botPlayer] = botNinja

@@ -1,12 +1,13 @@
 --[[
 	ArenaBuilder (Server)
-	Generates the game world programmatically: lobby plaza + arena battleground.
-	Styled after The Strongest Battlegrounds — urban city environment with
-	buildings, streets, props, and an open fighting area.
+	Generates the game world programmatically: lobby plaza + two arenas.
 
 	Layout:
 	  - Lobby: city plaza at origin (0, 0, 0)
-	  - Arena: open city block at (200, 0, 0)
+	  - City Arena: open city block at (200, 0, 0)
+	  - Shadow Realm: dark underworld arena at (400, 0, 0)
+
+	MatchManager randomly picks an arena each match.
 ]]
 
 local Workspace = game:GetService("Workspace")
@@ -671,6 +672,421 @@ local function buildArena()
 end
 
 --------------------------------------------------------------------------------
+-- BUILD SHADOW REALM (dark underworld arena)
+--------------------------------------------------------------------------------
+
+local function buildShadowRealm()
+	local folder = Instance.new("Folder")
+	folder.Name = "ShadowRealm"
+	folder.Parent = Workspace
+
+	local CX, CZ = 400, 0  -- shadow realm center
+
+	-- Void floor far below (neon lava layer visible through gaps)
+	local lavaFloor = createPart({
+		Name = "LavaFloor",
+		Size = Vector3.new(200, 2, 200),
+		Position = Vector3.new(CX, -12, CZ),
+		Color = Color3.fromRGB(255, 80, 0),
+		Material = Enum.Material.Neon,
+	})
+	lavaFloor.Parent = folder
+
+	-- Main fighting platform: dark obsidian
+	local platform = createPart({
+		Name = "ShadowPlatform",
+		Size = Vector3.new(100, 4, 100),
+		Position = Vector3.new(CX, -2, CZ),
+		Color = Color3.fromRGB(25, 20, 30),
+		Material = Enum.Material.Basalt,
+	})
+	platform.Parent = folder
+
+	-- Cracked stone surface layer
+	local surface = createPart({
+		Name = "ShadowSurface",
+		Size = Vector3.new(90, 0.5, 90),
+		Position = Vector3.new(CX, 0.25, CZ),
+		Color = Color3.fromRGB(35, 30, 40),
+		Material = Enum.Material.Slate,
+	})
+	surface.Parent = folder
+
+	-- LAVA CHANNELS: rivers of lava carved into the platform edges
+	local lavaChannels = {
+		-- Outer ring channels (gaps showing lava below)
+		{ pos = Vector3.new(CX - 42, -0.5, CZ), size = Vector3.new(3, 1, 80) },
+		{ pos = Vector3.new(CX + 42, -0.5, CZ), size = Vector3.new(3, 1, 80) },
+		{ pos = Vector3.new(CX, -0.5, CZ - 42), size = Vector3.new(80, 1, 3) },
+		{ pos = Vector3.new(CX, -0.5, CZ + 42), size = Vector3.new(80, 1, 3) },
+		-- Cross channels
+		{ pos = Vector3.new(CX - 20, -0.5, CZ - 20), size = Vector3.new(2, 1, 30) },
+		{ pos = Vector3.new(CX + 20, -0.5, CZ + 20), size = Vector3.new(2, 1, 30) },
+	}
+
+	for i, lc in ipairs(lavaChannels) do
+		local channel = createPart({
+			Name = "LavaChannel_" .. i,
+			Size = lc.size,
+			Position = lc.pos,
+			Color = Color3.fromRGB(255, 100, 0),
+			Material = Enum.Material.Neon,
+		})
+		channel.CanCollide = false
+		channel.Parent = folder
+
+		local lavaLight = Instance.new("PointLight")
+		lavaLight.Color = Color3.fromRGB(255, 80, 0)
+		lavaLight.Brightness = 1.5
+		lavaLight.Range = 12
+		lavaLight.Parent = channel
+	end
+
+	-- LAVA POOLS: bubbling lava pools at corners
+	local poolPositions = {
+		Vector3.new(CX - 35, -0.3, CZ - 35),
+		Vector3.new(CX + 35, -0.3, CZ - 35),
+		Vector3.new(CX - 35, -0.3, CZ + 35),
+		Vector3.new(CX + 35, -0.3, CZ + 35),
+	}
+
+	for i, poolPos in ipairs(poolPositions) do
+		local pool = createPart({
+			Name = "LavaPool_" .. i,
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(1, 10, 10),
+			CFrame = CFrame.new(poolPos),
+			Color = Color3.fromRGB(255, 60, 0),
+			Material = Enum.Material.Neon,
+		})
+		pool.CanCollide = false
+		pool.Parent = folder
+
+		local poolLight = Instance.new("PointLight")
+		poolLight.Color = Color3.fromRGB(255, 100, 0)
+		poolLight.Brightness = 3
+		poolLight.Range = 20
+		poolLight.Parent = pool
+	end
+
+	-- OBSIDIAN PILLARS: dark stone columns around the arena
+	local pillarData = {
+		{ pos = Vector3.new(CX - 30, 10, CZ - 30), height = 20, width = 4 },
+		{ pos = Vector3.new(CX + 30, 12, CZ - 30), height = 24, width = 3.5 },
+		{ pos = Vector3.new(CX - 30, 11, CZ + 30), height = 22, width = 3.5 },
+		{ pos = Vector3.new(CX + 30, 9, CZ + 30), height = 18, width = 4 },
+		{ pos = Vector3.new(CX - 38, 14, CZ), height = 28, width = 5 },
+		{ pos = Vector3.new(CX + 38, 13, CZ), height = 26, width = 5 },
+		{ pos = Vector3.new(CX, 15, CZ - 38), height = 30, width = 4.5 },
+		{ pos = Vector3.new(CX, 11, CZ + 38), height = 22, width = 4.5 },
+	}
+
+	for i, pd in ipairs(pillarData) do
+		local pillar = createPart({
+			Name = "ObsidianPillar_" .. i,
+			Size = Vector3.new(pd.width, pd.height, pd.width),
+			Position = pd.pos,
+			Color = Color3.fromRGB(20, 15, 25),
+			Material = Enum.Material.Basalt,
+		})
+		pillar.Parent = folder
+
+		-- Glowing rune accent at top
+		local runeAccent = createPart({
+			Name = "PillarRune_" .. i,
+			Size = Vector3.new(pd.width + 0.5, 1.5, pd.width + 0.5),
+			Position = pd.pos + Vector3.new(0, pd.height / 2 - 0.5, 0),
+			Color = Color3.fromRGB(160, 40, 200),
+			Material = Enum.Material.Neon,
+		})
+		runeAccent.Parent = folder
+
+		local runeLight = Instance.new("PointLight")
+		runeLight.Color = Color3.fromRGB(140, 30, 180)
+		runeLight.Brightness = 2
+		runeLight.Range = 15
+		runeLight.Parent = runeAccent
+	end
+
+	-- CENTER RUNE CIRCLE: glowing ritual circle on the ground
+	-- Outer ring
+	local runeRingOuter = createPart({
+		Name = "RuneRingOuter",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.15, 30, 30),
+		Position = Vector3.new(CX, 0.55, CZ),
+		Color = Color3.fromRGB(180, 50, 220),
+		Material = Enum.Material.Neon,
+	})
+	runeRingOuter.CanCollide = false
+	runeRingOuter.Parent = folder
+
+	-- Inner ring
+	local runeRingInner = createPart({
+		Name = "RuneRingInner",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.15, 18, 18),
+		Position = Vector3.new(CX, 0.56, CZ),
+		Color = Color3.fromRGB(120, 30, 160),
+		Material = Enum.Material.Neon,
+	})
+	runeRingInner.CanCollide = false
+	runeRingInner.Parent = folder
+
+	-- Fill inside the inner ring to hide the neon
+	local runeFill = createPart({
+		Name = "RuneFill",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.14, 17, 17),
+		Position = Vector3.new(CX, 0.555, CZ),
+		Color = Color3.fromRGB(35, 30, 40),
+		Material = Enum.Material.Slate,
+	})
+	runeFill.CanCollide = false
+	runeFill.Parent = folder
+
+	-- Rune lines (radial spokes inside the circle)
+	for i = 1, 8 do
+		local angle = math.rad(i * 45)
+		local lineLength = 14
+		local midX = CX + math.cos(angle) * lineLength / 2
+		local midZ = CZ + math.sin(angle) * lineLength / 2
+
+		local runeLine = createPart({
+			Name = "RuneLine_" .. i,
+			Size = Vector3.new(0.3, 0.1, lineLength),
+			CFrame = CFrame.lookAt(
+				Vector3.new(midX, 0.58, midZ),
+				Vector3.new(CX + math.cos(angle) * lineLength, 0.58, CZ + math.sin(angle) * lineLength)
+			),
+			Color = Color3.fromRGB(160, 40, 200),
+			Material = Enum.Material.Neon,
+		})
+		runeLine.CanCollide = false
+		runeLine.Parent = folder
+	end
+
+	-- Central rune glow
+	local centerGlow = Instance.new("PointLight")
+	centerGlow.Color = Color3.fromRGB(140, 30, 180)
+	centerGlow.Brightness = 2
+	centerGlow.Range = 25
+	centerGlow.Parent = runeRingOuter
+
+	-- FLOATING ROCKS: hovering chunks of dark stone above the arena
+	local floatingRocks = {
+		{ pos = Vector3.new(CX - 25, 25, CZ - 20), size = Vector3.new(8, 4, 6), rot = Vector3.new(10, 30, -5) },
+		{ pos = Vector3.new(CX + 20, 30, CZ + 15), size = Vector3.new(10, 5, 7), rot = Vector3.new(-8, 45, 12) },
+		{ pos = Vector3.new(CX + 30, 22, CZ - 25), size = Vector3.new(6, 3, 8), rot = Vector3.new(15, -20, 8) },
+		{ pos = Vector3.new(CX - 15, 35, CZ + 28), size = Vector3.new(12, 6, 9), rot = Vector3.new(-5, 60, -10) },
+		{ pos = Vector3.new(CX, 40, CZ), size = Vector3.new(14, 5, 14), rot = Vector3.new(3, 0, 3) },
+		{ pos = Vector3.new(CX - 35, 28, CZ + 10), size = Vector3.new(7, 3, 5), rot = Vector3.new(20, -40, 5) },
+		{ pos = Vector3.new(CX + 10, 33, CZ - 35), size = Vector3.new(9, 4, 6), rot = Vector3.new(-12, 25, -8) },
+	}
+
+	for i, rock in ipairs(floatingRocks) do
+		local floater = createPart({
+			Name = "FloatingRock_" .. i,
+			Size = rock.size,
+			Position = rock.pos,
+			Rotation = rock.rot,
+			Color = Color3.fromRGB(30 + math.random(-5, 5), 25 + math.random(-5, 5), 35 + math.random(-5, 5)),
+			Material = Enum.Material.Basalt,
+		})
+		floater.Parent = folder
+
+		-- Underside glow (lava light from below)
+		local underGlow = Instance.new("PointLight")
+		underGlow.Color = Color3.fromRGB(255, 80, 0)
+		underGlow.Brightness = 0.8
+		underGlow.Range = 10
+		underGlow.Parent = floater
+	end
+
+	-- CHAINS: hanging from floating rocks
+	local chainAnchors = {
+		{ from = Vector3.new(CX - 25, 22, CZ - 20), length = 18 },
+		{ from = Vector3.new(CX + 20, 26, CZ + 15), length = 22 },
+		{ from = Vector3.new(CX, 36, CZ), length = 32 },
+		{ from = Vector3.new(CX - 15, 30, CZ + 28), length = 26 },
+	}
+
+	for i, chain in ipairs(chainAnchors) do
+		local numLinks = math.floor(chain.length / 2)
+		for j = 0, numLinks - 1 do
+			local link = createPart({
+				Name = "ChainLink_" .. i .. "_" .. j,
+				Size = Vector3.new(0.4, 2, 0.4),
+				Position = chain.from + Vector3.new(0, -j * 2, 0),
+				Color = Color3.fromRGB(50, 45, 40),
+				Material = Enum.Material.Metal,
+			})
+			link.CanCollide = false
+			link.Parent = folder
+		end
+	end
+
+	-- SKULL PEDESTALS at spawn points
+	for _, spawnOffset in ipairs({ Vector3.new(0, 0, -20), Vector3.new(0, 0, 20) }) do
+		local pedestalPos = Vector3.new(CX, 0, CZ) + spawnOffset
+
+		-- Pedestal base
+		local pedestal = createPart({
+			Name = "SkullPedestal",
+			Size = Vector3.new(5, 1.5, 5),
+			Position = pedestalPos + Vector3.new(0, 0.75, 0),
+			Color = Color3.fromRGB(40, 35, 45),
+			Material = Enum.Material.Basalt,
+		})
+		pedestal.Parent = folder
+
+		-- Pedestal accent ring
+		local pedestalRing = createPart({
+			Name = "PedestalRing",
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(0.3, 6, 6),
+			Position = pedestalPos + Vector3.new(0, 1.5, 0),
+			Color = Color3.fromRGB(180, 50, 220),
+			Material = Enum.Material.Neon,
+		})
+		pedestalRing.CanCollide = false
+		pedestalRing.Parent = folder
+
+		-- Skull (simplified: sphere with smaller sphere eyes)
+		local skull = createPart({
+			Name = "Skull",
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(2.5, 2.5, 2.5),
+			Position = pedestalPos + Vector3.new(0, 3, 0),
+			Color = Color3.fromRGB(200, 190, 170),
+			Material = Enum.Material.SmoothPlastic,
+		})
+		skull.Parent = folder
+
+		-- Skull eyes
+		for _, eyeOffset in ipairs({ Vector3.new(-0.4, 0.2, -1), Vector3.new(0.4, 0.2, -1) }) do
+			local eye = createPart({
+				Name = "SkullEye",
+				Shape = Enum.PartType.Ball,
+				Size = Vector3.new(0.5, 0.5, 0.5),
+				Position = pedestalPos + Vector3.new(0, 3, 0) + eyeOffset,
+				Color = Color3.fromRGB(255, 30, 0),
+				Material = Enum.Material.Neon,
+			})
+			eye.Parent = folder
+
+			local eyeGlow = Instance.new("PointLight")
+			eyeGlow.Color = Color3.fromRGB(255, 30, 0)
+			eyeGlow.Brightness = 2
+			eyeGlow.Range = 6
+			eyeGlow.Parent = eye
+		end
+	end
+
+	-- EDGE FLAMES: fire-colored neon pillars along the platform edge
+	for i = 0, 7 do
+		local angle = math.rad(i * 45 + 22.5)
+		local dist = 44
+		local flamePos = Vector3.new(CX + math.cos(angle) * dist, 3, CZ + math.sin(angle) * dist)
+
+		local flameBase = createPart({
+			Name = "FlameBase_" .. i,
+			Size = Vector3.new(2, 6, 2),
+			Position = flamePos,
+			Color = Color3.fromRGB(40, 30, 45),
+			Material = Enum.Material.Basalt,
+		})
+		flameBase.Parent = folder
+
+		-- Flame tip (neon)
+		local flameTip = createPart({
+			Name = "FlameTip_" .. i,
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(2.5, 3.5, 2.5),
+			Position = flamePos + Vector3.new(0, 5, 0),
+			Color = Color3.fromRGB(255, 100, 0),
+			Material = Enum.Material.Neon,
+		})
+		flameTip.Parent = folder
+
+		local flameLight = Instance.new("PointLight")
+		flameLight.Color = Color3.fromRGB(255, 80, 0)
+		flameLight.Brightness = 2.5
+		flameLight.Range = 18
+		flameLight.Parent = flameTip
+	end
+
+	-- BROKEN ROCK DEBRIS on the platform surface
+	local debrisPositions = {
+		Vector3.new(CX + 12, 0, CZ + 8),
+		Vector3.new(CX - 15, 0, CZ - 10),
+		Vector3.new(CX + 8, 0, CZ - 15),
+		Vector3.new(CX - 10, 0, CZ + 12),
+	}
+	for _, dPos in ipairs(debrisPositions) do
+		for j = 1, math.random(2, 4) do
+			local debris = createPart({
+				Name = "ShadowDebris",
+				Size = Vector3.new(
+					math.random() * 2 + 0.5,
+					math.random() * 1 + 0.3,
+					math.random() * 2 + 0.5
+				),
+				Position = dPos + Vector3.new(
+					(math.random() - 0.5) * 5,
+					math.random() * 0.5 + 0.3,
+					(math.random() - 0.5) * 5
+				),
+				Color = Color3.fromRGB(
+					30 + math.random(-5, 10),
+					25 + math.random(-5, 10),
+					35 + math.random(-5, 10)
+				),
+				Material = Enum.Material.Basalt,
+				Rotation = Vector3.new(
+					math.random() * 25,
+					math.random() * 360,
+					math.random() * 25
+				),
+			})
+			debris.Parent = folder
+		end
+	end
+
+	-- Arena spawn points (invisible)
+	local spawnA = Instance.new("SpawnLocation")
+	spawnA.Name = "ShadowSpawnA"
+	spawnA.Anchored = true
+	spawnA.Size = Vector3.new(6, 0.2, 6)
+	spawnA.Position = Vector3.new(CX, 0.6, CZ - 20)
+	spawnA.TopSurface = Enum.SurfaceType.Smooth
+	spawnA.CanCollide = true
+	spawnA.Enabled = false
+	spawnA.Transparency = 1
+	spawnA.Parent = folder
+
+	local spawnB = Instance.new("SpawnLocation")
+	spawnB.Name = "ShadowSpawnB"
+	spawnB.Anchored = true
+	spawnB.Size = Vector3.new(6, 0.2, 6)
+	spawnB.Position = Vector3.new(CX, 0.6, CZ + 20)
+	spawnB.TopSurface = Enum.SurfaceType.Smooth
+	spawnB.CanCollide = true
+	spawnB.Enabled = false
+	spawnB.Transparency = 1
+	spawnB.Parent = folder
+
+	-- Invisible boundaries
+	createInvisibleWall(folder, Vector3.new(CX, 20, CZ - 52), Vector3.new(110, 40, 2))
+	createInvisibleWall(folder, Vector3.new(CX, 20, CZ + 52), Vector3.new(110, 40, 2))
+	createInvisibleWall(folder, Vector3.new(CX - 52, 20, CZ), Vector3.new(2, 40, 110))
+	createInvisibleWall(folder, Vector3.new(CX + 52, 20, CZ), Vector3.new(2, 40, 110))
+	createInvisibleWall(folder, Vector3.new(CX, 55, CZ), Vector3.new(110, 2, 110)) -- ceiling
+
+	return folder
+end
+
+--------------------------------------------------------------------------------
 -- BUILD EVERYTHING
 --------------------------------------------------------------------------------
 
@@ -678,8 +1094,9 @@ setupEnvironment()
 
 local lobby = buildLobby()
 local arena = buildArena()
+local shadowRealm = buildShadowRealm()
 
--- Store spawn positions as attributes for MatchManager
+-- Store spawn positions as attributes for MatchManager (City Arena)
 arena:SetAttribute("SpawnA_X", 200)
 arena:SetAttribute("SpawnA_Y", 1)
 arena:SetAttribute("SpawnA_Z", -20)
@@ -690,6 +1107,15 @@ arena:SetAttribute("LobbySpawn_X", 0)
 arena:SetAttribute("LobbySpawn_Y", 1)
 arena:SetAttribute("LobbySpawn_Z", 0)
 
-print("[ArenaBuilder] City environment built!")
+-- Store spawn positions for Shadow Realm
+shadowRealm:SetAttribute("SpawnA_X", 400)
+shadowRealm:SetAttribute("SpawnA_Y", 1)
+shadowRealm:SetAttribute("SpawnA_Z", -20)
+shadowRealm:SetAttribute("SpawnB_X", 400)
+shadowRealm:SetAttribute("SpawnB_Y", 1)
+shadowRealm:SetAttribute("SpawnB_Z", 20)
+
+print("[ArenaBuilder] All arenas built!")
 print("  Lobby plaza: (0, 1, 0)")
-print("  Arena intersection: (200, 1, -20) / (200, 1, 20)")
+print("  City Arena: (200, 1, -20) / (200, 1, 20)")
+print("  Shadow Realm: (400, 1, -20) / (400, 1, 20)")
