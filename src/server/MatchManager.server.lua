@@ -82,7 +82,7 @@ matchKOEvent.Parent = game:GetService("ServerScriptService")
 --------------------------------------------------------------------------------
 
 local function isBotPlayer(player)
-	return player and player.IsBot == true
+	return typeof(player) == "table" and player.IsBot == true
 end
 
 local function safeFireClient(remote, player, ...)

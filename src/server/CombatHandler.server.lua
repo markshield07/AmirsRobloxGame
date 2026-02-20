@@ -53,7 +53,7 @@ end
 --------------------------------------------------------------------------------
 
 local function isBot(player)
-	return player and player.IsBot == true
+	return typeof(player) == "table" and player.IsBot == true
 end
 
 local function safeFireClient(remote, player, ...)
