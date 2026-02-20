@@ -70,6 +70,10 @@ Remotes.Combat = {
 	UltimateUpdate = getOrCreateRemote(combatFolder, "UltimateUpdate"),
 	-- Server -> Client: cooldown started for an ability
 	CooldownStart = getOrCreateRemote(combatFolder, "CooldownStart"),
+	-- Server -> All Clients: broadcast a combat action for VFX/sound
+	-- Args: (actingPlayer, actionType, data)
+	-- actionType: "M1", "Ability", "Dash", "BlockStart", "BlockEnd"
+	ActionVFX = getOrCreateRemote(combatFolder, "ActionVFX"),
 }
 
 --------------------------------------------------------------------------------

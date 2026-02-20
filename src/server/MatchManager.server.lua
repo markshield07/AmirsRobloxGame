@@ -224,9 +224,9 @@ startMatch = function(player1, player2)
 
 	print("[MatchManager] Match #" .. matchId .. ": " .. player1.Name .. " vs " .. player2.Name)
 
-	-- Notify players (safe for bots)
-	safeFireClient(Remotes.Match.MatchFound, player1, player2.Name, getNinjaSelection(player2))
-	safeFireClient(Remotes.Match.MatchFound, player2, player1.Name, getNinjaSelection(player1))
+	-- Notify players (safe for bots) — includes own ninja key for client VFX
+	safeFireClient(Remotes.Match.MatchFound, player1, player2.Name, getNinjaSelection(player2), getNinjaSelection(player1))
+	safeFireClient(Remotes.Match.MatchFound, player2, player1.Name, getNinjaSelection(player1), getNinjaSelection(player2))
 
 	-- Wait for CombatHandler to be ready
 	CombatAPI.WaitForReady()

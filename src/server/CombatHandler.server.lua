@@ -217,12 +217,13 @@ local function applyDamage(attacker, victim, rawDamage, breaksBlock)
 	safeFireClient(Remotes.Combat.UltimateUpdate, attacker, attackerState.UltimateCharge, CombatConfig.Ultimate.MaxCharge)
 	safeFireClient(Remotes.Combat.UltimateUpdate, victim, victimState.UltimateCharge, CombatConfig.Ultimate.MaxCharge)
 
-	-- Hit effect to all real clients
+	-- Hit effect to all real clients (includes attacker element for VFX coloring)
 	local victimChar = victim.Character
 	if victimChar then
 		local hitRoot = victimChar:FindFirstChild("HumanoidRootPart")
 		if hitRoot then
-			fireAllRealClients(Remotes.Combat.HitEffect, hitRoot.Position, actualDamage, breaksBlock)
+			local attackerElement = attackerState.NinjaInfo and attackerState.NinjaInfo.Element or "Fire"
+			fireAllRealClients(Remotes.Combat.HitEffect, hitRoot.Position, actualDamage, breaksBlock, attackerElement)
 		end
 	end
 
@@ -293,6 +294,12 @@ local function performAttack(player)
 		end
 	end
 
+	-- Broadcast M1 VFX to all clients
+	fireAllRealClients(Remotes.Combat.ActionVFX, player, "M1", {
+		ComboIndex = hitIndex,
+		Ninja = state.Ninja,
+	})
+
 	if hitIndex >= CombatConfig.M1.HitCount then
 		state.ComboIndex = 0
 		state.IsUsingAbility = true
@@ -311,8 +318,14 @@ local function performBlock(player, blocking)
 		if not canAct(state) then return end
 		state.IsBlocking = true
 		state.ComboIndex = 0
+		fireAllRealClients(Remotes.Combat.ActionVFX, player, "BlockStart", {
+			Ninja = state.Ninja,
+		})
 	else
 		state.IsBlocking = false
+		fireAllRealClients(Remotes.Combat.ActionVFX, player, "BlockEnd", {
+			Ninja = state.Ninja,
+		})
 	end
 end
 
@@ -328,6 +341,12 @@ local function performDash(player, direction)
 	state.LastStaminaUse = now()
 	state._dashCooldownEnd = now() + CombatConfig.Dash.Cooldown
 	safeFireClient(Remotes.Combat.StaminaUpdate, player, state.Stamina, CombatConfig.Stamina.Max)
+
+	-- Broadcast dash VFX
+	fireAllRealClients(Remotes.Combat.ActionVFX, player, "Dash", {
+		Direction = typeof(direction) == "Vector3" and direction or nil,
+		Ninja = state.Ninja,
+	})
 
 	state.IsDashing = true
 	local char = player.Character
@@ -372,6 +391,12 @@ local function performAbility(player, slot)
 	end
 
 	state.IsUsingAbility = true
+
+	-- Broadcast ability VFX to all clients
+	fireAllRealClients(Remotes.Combat.ActionVFX, player, "Ability", {
+		Slot = slot,
+		Ninja = state.Ninja,
+	})
 
 	local opponent = getOpponent(player)
 	local damage = ability.Damage or 0
