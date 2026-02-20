@@ -259,6 +259,23 @@ local function createHUD()
 	queueCorner.CornerRadius = UDim.new(0, 10)
 	queueCorner.Parent = queueButton
 
+	-- ===== PRACTICE BUTTON (lobby) =====
+	local practiceButton = Instance.new("TextButton")
+	practiceButton.Name = "PracticeButton"
+	practiceButton.Size = UDim2.new(0, 200, 0, 50)
+	practiceButton.Position = UDim2.new(0.5, -100, 0.82, 0)
+	practiceButton.BackgroundColor3 = Color3.fromRGB(60, 100, 200)
+	practiceButton.Text = "PRACTICE vs BOT"
+	practiceButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	practiceButton.TextScaled = true
+	practiceButton.Font = Enum.Font.GothamBold
+	practiceButton.BorderSizePixel = 0
+	practiceButton.Parent = screenGui
+
+	local practiceCorner = Instance.new("UICorner")
+	practiceCorner.CornerRadius = UDim.new(0, 10)
+	practiceCorner.Parent = practiceButton
+
 	return screenGui
 end
 
@@ -392,6 +409,8 @@ end)
 Remotes.Match.MatchFound.OnClientEvent:Connect(function(opponentName, opponentNinja)
 	local queueButton = getElement("QueueButton")
 	if queueButton then queueButton.Visible = false end
+	local practiceButton = getElement("PracticeButton")
+	if practiceButton then practiceButton.Visible = false end
 	showAnnouncement("VS " .. opponentName, 2)
 end)
 
@@ -417,7 +436,7 @@ Remotes.Match.MatchEnd.OnClientEvent:Connect(function(winnerName)
 	-- Reset queue state so button works correctly after match
 	isQueued = false
 
-	-- Show queue button again after a delay
+	-- Show buttons again after a delay
 	task.delay(4, function()
 		local queueBtn = getElement("QueueButton")
 		if queueBtn then
@@ -425,6 +444,8 @@ Remotes.Match.MatchEnd.OnClientEvent:Connect(function(winnerName)
 			queueBtn.Text = "FIND MATCH"
 			queueBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 60)
 		end
+		local practiceBtn = getElement("PracticeButton")
+		if practiceBtn then practiceBtn.Visible = true end
 		local oppFrame = getElement("OpponentHealthFrame")
 		if oppFrame then oppFrame.Visible = false end
 		local scoreLabel = getElement("ScoreLabel")
@@ -461,6 +482,19 @@ if queueButton then
 			isQueued = false
 			Remotes.Match.LeaveQueue:FireServer()
 		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- PRACTICE BUTTON INTERACTION
+--------------------------------------------------------------------------------
+
+local practiceButton = getElement("PracticeButton")
+if practiceButton then
+	practiceButton.MouseButton1Click:Connect(function()
+		practiceButton.Visible = false
+		if queueButton then queueButton.Visible = false end
+		Remotes.Match.StartPractice:FireServer()
 	end)
 end
 

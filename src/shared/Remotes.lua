@@ -94,6 +94,10 @@ Remotes.Match = {
 	MatchEnd      = getOrCreateRemote(matchFolder, "MatchEnd"),
 	-- Server -> Client: update queue status
 	QueueStatus   = getOrCreateRemote(matchFolder, "QueueStatus"),
+	-- Client -> Server: player wants to start practice vs bot
+	StartPractice = getOrCreateRemote(matchFolder, "StartPractice"),
+	-- Client -> Server: player wants to leave practice
+	LeavePractice = getOrCreateRemote(matchFolder, "LeavePractice"),
 }
 
 return Remotes

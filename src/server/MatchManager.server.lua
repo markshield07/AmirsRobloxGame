@@ -81,6 +81,15 @@ matchKOEvent.Parent = game:GetService("ServerScriptService")
 -- HELPERS
 --------------------------------------------------------------------------------
 
+local function isBotPlayer(player)
+	return player and player.IsBot == true
+end
+
+local function safeFireClient(remote, player, ...)
+	if isBotPlayer(player) then return end
+	remote:FireClient(player, ...)
+end
+
 local function teleportPlayer(player, position)
 	local char = player.Character
 	if char then
@@ -126,6 +135,8 @@ local startMatch
 local startRound
 local endRound
 local endMatch
+local startPracticeMatch
+local endPracticeMatch
 
 --------------------------------------------------------------------------------
 -- NINJA SELECTION
@@ -201,16 +212,23 @@ startMatch = function(player1, player2)
 
 	print("[MatchManager] Match #" .. matchId .. ": " .. player1.Name .. " vs " .. player2.Name)
 
-	-- Notify players
-	Remotes.Match.MatchFound:FireClient(player1, player2.Name, getNinjaSelection(player2))
-	Remotes.Match.MatchFound:FireClient(player2, player1.Name, getNinjaSelection(player1))
+	-- Notify players (safe for bots)
+	safeFireClient(Remotes.Match.MatchFound, player1, player2.Name, getNinjaSelection(player2))
+	safeFireClient(Remotes.Match.MatchFound, player2, player1.Name, getNinjaSelection(player1))
 
-	-- Wait for CombatHandler to be ready (no more race condition)
+	-- Wait for CombatHandler to be ready
 	CombatAPI.WaitForReady()
 
 	-- Initialize combat states with match ID so getOpponent is match-aware
 	CombatAPI.InitPlayerCombat(player1, getNinjaSelection(player1), matchId)
 	CombatAPI.InitPlayerCombat(player2, getNinjaSelection(player2), matchId)
+
+	-- Start bot AI if one participant is a bot
+	if isBotPlayer(player2) and CombatAPI.StartBotAI then
+		CombatAPI.StartBotAI(player2, player1)
+	elseif isBotPlayer(player1) and CombatAPI.StartBotAI then
+		CombatAPI.StartBotAI(player1, player2)
+	end
 
 	-- Start first round
 	task.spawn(function()
@@ -236,32 +254,29 @@ startRound = function(match)
 
 	-- Countdown
 	for i = CombatConfig.Match.CountdownTime, 1, -1 do
-		Remotes.Match.RoundStart:FireClient(match.Player1, roundNum, i)
-		Remotes.Match.RoundStart:FireClient(match.Player2, roundNum, i)
+		safeFireClient(Remotes.Match.RoundStart, match.Player1, roundNum, i)
+		safeFireClient(Remotes.Match.RoundStart, match.Player2, roundNum, i)
 		task.wait(1)
 	end
 
 	-- FIGHT!
-	Remotes.Match.RoundStart:FireClient(match.Player1, roundNum, 0)
-	Remotes.Match.RoundStart:FireClient(match.Player2, roundNum, 0)
+	safeFireClient(Remotes.Match.RoundStart, match.Player1, roundNum, 0)
+	safeFireClient(Remotes.Match.RoundStart, match.Player2, roundNum, 0)
 end
 
 endRound = function(match, winner, loser)
 	if not match.IsActive then return end
 
-	-- Update scores
 	match.Scores[winner] = match.Scores[winner] + 1
 
-	-- Send each player their own score first, opponent's second
 	local p1Score = match.Scores[match.Player1]
 	local p2Score = match.Scores[match.Player2]
 
-	Remotes.Match.RoundEnd:FireClient(match.Player1, winner.Name, p1Score, p2Score)
-	Remotes.Match.RoundEnd:FireClient(match.Player2, winner.Name, p2Score, p1Score)
+	safeFireClient(Remotes.Match.RoundEnd, match.Player1, winner.Name, p1Score, p2Score)
+	safeFireClient(Remotes.Match.RoundEnd, match.Player2, winner.Name, p2Score, p1Score)
 
 	print("[MatchManager] Round won by " .. winner.Name .. " (" .. p1Score .. "-" .. p2Score .. ")")
 
-	-- Check if match is over
 	if match.Scores[winner] >= CombatConfig.Match.RoundsToWin then
 		task.wait(CombatConfig.Match.RoundEndFreeze)
 		endMatch(match, winner, loser)
@@ -276,24 +291,104 @@ endMatch = function(match, winner, loser)
 
 	print("[MatchManager] Match #" .. match.Id .. " won by " .. winner.Name)
 
-	-- Send winner name to both players
-	Remotes.Match.MatchEnd:FireClient(match.Player1, winner.Name)
-	Remotes.Match.MatchEnd:FireClient(match.Player2, winner.Name)
+	safeFireClient(Remotes.Match.MatchEnd, match.Player1, winner.Name)
+	safeFireClient(Remotes.Match.MatchEnd, match.Player2, winner.Name)
 
-	-- Clean up combat states
-	CombatAPI.RemovePlayerCombat(match.Player1)
-	CombatAPI.RemovePlayerCombat(match.Player2)
+	-- Stop bot AI and destroy bot if applicable
+	if isBotPlayer(match.Player2) then
+		if CombatAPI.StopBotAI then CombatAPI.StopBotAI(match.Player2) end
+		CombatAPI.RemovePlayerCombat(match.Player2)
+		if CombatAPI.DestroyBot then CombatAPI.DestroyBot(match.Player2) end
+		CombatAPI.RemovePlayerCombat(match.Player1)
+	elseif isBotPlayer(match.Player1) then
+		if CombatAPI.StopBotAI then CombatAPI.StopBotAI(match.Player1) end
+		CombatAPI.RemovePlayerCombat(match.Player1)
+		if CombatAPI.DestroyBot then CombatAPI.DestroyBot(match.Player1) end
+		CombatAPI.RemovePlayerCombat(match.Player2)
+	else
+		CombatAPI.RemovePlayerCombat(match.Player1)
+		CombatAPI.RemovePlayerCombat(match.Player2)
+	end
 
-	-- Teleport back to lobby
-	task.wait(2)
-	teleportPlayer(match.Player1, LOBBY_SPAWN)
-	teleportPlayer(match.Player2, LOBBY_SPAWN)
+	-- Teleport real players back to lobby
+	if not isBotPlayer(match.Player1) then
+		task.wait(2)
+		teleportPlayer(match.Player1, LOBBY_SPAWN)
+	end
+	if not isBotPlayer(match.Player2) then
+		task.wait(0.1)
+		teleportPlayer(match.Player2, LOBBY_SPAWN)
+	end
 
 	-- Clean up match tracking
 	playerToMatch[match.Player1] = nil
 	playerToMatch[match.Player2] = nil
 	activeMatches[match.Id] = nil
 end
+
+--------------------------------------------------------------------------------
+-- PRACTICE MODE (Player vs Bot)
+--------------------------------------------------------------------------------
+
+-- Pick a random ninja for the bot that's different from the player's choice
+local function pickBotNinja(playerNinja)
+	local allNinjas = NinjaData.GetAllNinjaNames()
+	local choices = {}
+	for _, name in ipairs(allNinjas) do
+		if name ~= playerNinja then
+			table.insert(choices, name)
+		end
+	end
+	if #choices > 0 then
+		return choices[math.random(1, #choices)]
+	end
+	return "MistBlade" -- fallback
+end
+
+startPracticeMatch = function(player)
+	if isInMatch(player) or isInQueue(player) then return end
+
+	CombatAPI.WaitForReady()
+
+	-- Wait for bot functions to be registered by BotManager
+	local attempts = 0
+	while not CombatAPI.SpawnBot and attempts < 50 do
+		task.wait(0.1)
+		attempts = attempts + 1
+	end
+	if not CombatAPI.SpawnBot then
+		warn("[MatchManager] BotManager not loaded, cannot start practice")
+		return
+	end
+
+	local playerNinja = getNinjaSelection(player)
+	local botNinja = pickBotNinja(playerNinja)
+
+	-- Spawn bot at arena spawn B
+	local botPlayer = CombatAPI.SpawnBot(botNinja, ARENA_SPAWN_B)
+
+	-- Start a match with the real player vs the bot
+	startMatch(player, botPlayer)
+
+	print("[MatchManager] Practice match started: " .. player.Name .. " vs " .. botPlayer.Name)
+end
+
+Remotes.Match.StartPractice.OnServerEvent:Connect(function(player)
+	task.spawn(function()
+		startPracticeMatch(player)
+	end)
+end)
+
+Remotes.Match.LeavePractice.OnServerEvent:Connect(function(player)
+	local matchId = playerToMatch[player]
+	if not matchId then return end
+
+	local match = activeMatches[matchId]
+	if not match or not match.IsActive then return end
+
+	-- End match (player forfeits, but we don't care about the winner in practice)
+	endMatch(match, player, player) -- player "wins" by leaving
+end)
 
 --------------------------------------------------------------------------------
 -- KO EVENT LISTENER
@@ -321,10 +416,11 @@ Players.PlayerRemoving:Connect(function(player)
 	if matchId then
 		local match = activeMatches[matchId]
 		if match and match.IsActive then
-			local winner = (match.Player1 == player) and match.Player2 or match.Player1
-			endMatch(match, winner, player)
+			-- If vs bot, just clean up; otherwise other player wins
+			local otherPlayer = (match.Player1 == player) and match.Player2 or match.Player1
+			endMatch(match, otherPlayer, player)
 		end
 	end
 end)
 
-print("[MatchManager] Loaded")
+print("[MatchManager] Loaded (with practice mode)")
