@@ -12,6 +12,77 @@
 ]]
 
 local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+
+--------------------------------------------------------------------------------
+-- ENVIRONMENT SETUP
+-- Clears old place settings (terrain, skybox, atmosphere) and applies our own.
+--------------------------------------------------------------------------------
+
+local function setupEnvironment()
+	-- Clear terrain left over from any previous place
+	Workspace.Terrain:Clear()
+
+	-- Remove any existing Sky / Atmosphere / Clouds / BloomEffect etc.
+	for _, child in ipairs(Lighting:GetChildren()) do
+		child:Destroy()
+	end
+
+	-- Lighting properties – dark arena vibe with neon highlights
+	Lighting.Ambient = Color3.fromRGB(40, 40, 50)
+	Lighting.OutdoorAmbient = Color3.fromRGB(40, 40, 50)
+	Lighting.Brightness = 1.5
+	Lighting.ClockTime = 0          -- midnight sky
+	Lighting.GeographicLatitude = 0
+	Lighting.FogEnd = 1500
+	Lighting.FogStart = 0
+	Lighting.FogColor = Color3.fromRGB(15, 15, 25)
+	Lighting.GlobalShadows = true
+	Lighting.EnvironmentDiffuseScale = 0.5
+	Lighting.EnvironmentSpecularScale = 0.5
+
+	-- Atmosphere – slight haze for depth
+	local atmo = Instance.new("Atmosphere")
+	atmo.Density = 0.25
+	atmo.Offset = 0.2
+	atmo.Color = Color3.fromRGB(60, 60, 80)
+	atmo.Decay = Color3.fromRGB(80, 80, 100)
+	atmo.Glare = 0
+	atmo.Haze = 2
+	atmo.Parent = Lighting
+
+	-- Sky – dark starry sky (use Roblox default skybox textures cleared = black sky)
+	local sky = Instance.new("Sky")
+	sky.StarCount = 5000
+	sky.CelestialBodiesShown = true
+	sky.MoonAngularSize = 11
+	sky.SunAngularSize = 10
+	-- Clear all skybox faces so we get a clean dark sky
+	sky.SkyboxBk = ""
+	sky.SkyboxDn = ""
+	sky.SkyboxFt = ""
+	sky.SkyboxLf = ""
+	sky.SkyboxRt = ""
+	sky.SkyboxUp = ""
+	sky.Parent = Lighting
+
+	-- Bloom for neon glow effect
+	local bloom = Instance.new("BloomEffect")
+	bloom.Intensity = 0.4
+	bloom.Size = 30
+	bloom.Threshold = 1.5
+	bloom.Parent = Lighting
+
+	-- Color correction – slight blue tint for ninja arena feel
+	local cc = Instance.new("ColorCorrectionEffect")
+	cc.Brightness = 0
+	cc.Contrast = 0.1
+	cc.Saturation = 0.15
+	cc.TintColor = Color3.fromRGB(230, 230, 255)
+	cc.Parent = Lighting
+
+	print("[ArenaBuilder] Environment configured (old place settings cleared)")
+end
 
 --------------------------------------------------------------------------------
 -- HELPERS
@@ -213,6 +284,10 @@ end
 -- BUILD EVERYTHING
 --------------------------------------------------------------------------------
 
+-- Step 1: Wipe old place environment (terrain, skybox, lighting) and apply ours
+setupEnvironment()
+
+-- Step 2: Build the game world
 local lobby = buildLobby()
 local arena = buildArena()
 

@@ -32,6 +32,42 @@
       "GameUI": {
         "$path": "src/gui"
       }
+    },
+
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": {
+        "Ambient": [
+          "Color3",
+          [0.157, 0.157, 0.196]
+        ],
+        "OutdoorAmbient": [
+          "Color3",
+          [0.157, 0.157, 0.196]
+        ],
+        "Brightness": 1.5,
+        "ClockTime": 0,
+        "GlobalShadows": true,
+        "FogEnd": 1500,
+        "FogColor": [
+          "Color3",
+          [0.059, 0.059, 0.098]
+        ]
+      }
+    },
+
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": {
+        "Gravity": 196.2
+      }
+    },
+
+    "SoundService": {
+      "$className": "SoundService",
+      "$properties": {
+        "RespectFilteringEnabled": true
+      }
     }
   }
 }
