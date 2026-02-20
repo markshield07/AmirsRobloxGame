@@ -1,0 +1,20 @@
+# Roblox place files (binary, use Rojo instead)
+*.rbxl
+*.rbxlx
+
+# Rojo lock files
+*.rbxl.lock
+*.rbxlx.lock
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Wally packages (Roblox package manager)
+Packages/
+wally.lock
