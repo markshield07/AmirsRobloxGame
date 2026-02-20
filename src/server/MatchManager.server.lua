@@ -90,8 +90,20 @@ local function safeFireClient(remote, player, ...)
 	remote:FireClient(player, ...)
 end
 
-local function teleportPlayer(player, position)
+local function waitForCharacter(player)
+	if isBotPlayer(player) then return player.Character end
+	if not player.Character then
+		player.CharacterAdded:Wait()
+	end
 	local char = player.Character
+	if char and not char:FindFirstChild("HumanoidRootPart") then
+		char:WaitForChild("HumanoidRootPart", 5)
+	end
+	return player.Character
+end
+
+local function teleportPlayer(player, position)
+	local char = waitForCharacter(player)
 	if char then
 		local root = char:FindFirstChild("HumanoidRootPart")
 		if root then
@@ -346,7 +358,13 @@ local function pickBotNinja(playerNinja)
 end
 
 startPracticeMatch = function(player)
-	if isInMatch(player) or isInQueue(player) then return end
+	if isInMatch(player) or isInQueue(player) then
+		print("[MatchManager] Player already in match or queue, ignoring practice request")
+		return
+	end
+
+	-- Make sure player character is loaded before proceeding
+	waitForCharacter(player)
 
 	CombatAPI.WaitForReady()
 
@@ -367,6 +385,9 @@ startPracticeMatch = function(player)
 	-- Spawn bot at arena spawn B
 	local botPlayer = CombatAPI.SpawnBot(botNinja, ARENA_SPAWN_B)
 
+	-- Register bot's ninja selection so startMatch uses the correct ninja
+	playerNinjaSelection[botPlayer] = botNinja
+
 	-- Start a match with the real player vs the bot
 	startMatch(player, botPlayer)
 
@@ -375,7 +396,23 @@ end
 
 Remotes.Match.StartPractice.OnServerEvent:Connect(function(player)
 	task.spawn(function()
-		startPracticeMatch(player)
+		local ok, err = pcall(startPracticeMatch, player)
+		if not ok then
+			warn("[MatchManager] Practice match error: " .. tostring(err))
+			-- Clean up match state so player can try again
+			local matchId = playerToMatch[player]
+			if matchId then
+				local match = activeMatches[matchId]
+				if match then
+					match.IsActive = false
+					playerToMatch[match.Player1] = nil
+					playerToMatch[match.Player2] = nil
+					activeMatches[matchId] = nil
+				end
+			end
+			-- Tell client the match is over so buttons restore
+			safeFireClient(Remotes.Match.MatchEnd, player, "Error")
+		end
 	end)
 end)
 

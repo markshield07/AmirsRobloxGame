@@ -407,6 +407,7 @@ end)
 
 -- Match events
 Remotes.Match.MatchFound.OnClientEvent:Connect(function(opponentName, opponentNinja)
+	waitingForPractice = false
 	local queueButton = getElement("QueueButton")
 	if queueButton then queueButton.Visible = false end
 	local practiceButton = getElement("PracticeButton")
@@ -433,8 +434,9 @@ end)
 Remotes.Match.MatchEnd.OnClientEvent:Connect(function(winnerName)
 	showAnnouncement(winnerName .. " WINS THE MATCH!", 3)
 
-	-- Reset queue state so button works correctly after match
+	-- Reset state so buttons work correctly after match
 	isQueued = false
+	waitingForPractice = false
 
 	-- Show buttons again after a delay
 	task.delay(4, function()
@@ -445,7 +447,11 @@ Remotes.Match.MatchEnd.OnClientEvent:Connect(function(winnerName)
 			queueBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 60)
 		end
 		local practiceBtn = getElement("PracticeButton")
-		if practiceBtn then practiceBtn.Visible = true end
+		if practiceBtn then
+			practiceBtn.Visible = true
+			practiceBtn.Text = "PRACTICE vs BOT"
+			practiceBtn.BackgroundColor3 = Color3.fromRGB(60, 100, 200)
+		end
 		local oppFrame = getElement("OpponentHealthFrame")
 		if oppFrame then oppFrame.Visible = false end
 		local scoreLabel = getElement("ScoreLabel")
@@ -489,12 +495,33 @@ end
 -- PRACTICE BUTTON INTERACTION
 --------------------------------------------------------------------------------
 
+local waitingForPractice = false
+
 local practiceButton = getElement("PracticeButton")
 if practiceButton then
 	practiceButton.MouseButton1Click:Connect(function()
-		practiceButton.Visible = false
+		if waitingForPractice then return end
+		waitingForPractice = true
+
+		practiceButton.Text = "STARTING..."
+		practiceButton.BackgroundColor3 = Color3.fromRGB(120, 120, 120)
 		if queueButton then queueButton.Visible = false end
 		Remotes.Match.StartPractice:FireServer()
+
+		-- Safety timeout: restore buttons if match doesn't start within 10 seconds
+		task.delay(10, function()
+			if waitingForPractice then
+				waitingForPractice = false
+				if practiceButton then
+					practiceButton.Text = "PRACTICE vs BOT"
+					practiceButton.BackgroundColor3 = Color3.fromRGB(60, 100, 200)
+					practiceButton.Visible = true
+				end
+				if queueButton then
+					queueButton.Visible = true
+				end
+			end
+		end)
 	end)
 end
 
