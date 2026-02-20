@@ -28,57 +28,50 @@ local function setupEnvironment()
 		child:Destroy()
 	end
 
-	-- Lighting properties – dark arena vibe with neon highlights
-	Lighting.Ambient = Color3.fromRGB(40, 40, 50)
-	Lighting.OutdoorAmbient = Color3.fromRGB(40, 40, 50)
-	Lighting.Brightness = 1.5
-	Lighting.ClockTime = 0          -- midnight sky
-	Lighting.GeographicLatitude = 0
-	Lighting.FogEnd = 1500
-	Lighting.FogStart = 0
-	Lighting.FogColor = Color3.fromRGB(15, 15, 25)
+	-- Lighting properties – bright evening arena, easy to see everything
+	Lighting.Ambient = Color3.fromRGB(120, 120, 140)
+	Lighting.OutdoorAmbient = Color3.fromRGB(100, 100, 120)
+	Lighting.Brightness = 3
+	Lighting.ClockTime = 16.5        -- late afternoon, warm sunlight
+	Lighting.GeographicLatitude = 20
+	Lighting.FogEnd = 5000
+	Lighting.FogStart = 500
+	Lighting.FogColor = Color3.fromRGB(140, 130, 170)
 	Lighting.GlobalShadows = true
-	Lighting.EnvironmentDiffuseScale = 0.5
-	Lighting.EnvironmentSpecularScale = 0.5
+	Lighting.EnvironmentDiffuseScale = 1
+	Lighting.EnvironmentSpecularScale = 1
 
-	-- Atmosphere – slight haze for depth
+	-- Atmosphere – light haze for depth, not too thick
 	local atmo = Instance.new("Atmosphere")
-	atmo.Density = 0.25
-	atmo.Offset = 0.2
-	atmo.Color = Color3.fromRGB(60, 60, 80)
-	atmo.Decay = Color3.fromRGB(80, 80, 100)
+	atmo.Density = 0.15
+	atmo.Offset = 0.5
+	atmo.Color = Color3.fromRGB(180, 170, 200)
+	atmo.Decay = Color3.fromRGB(140, 130, 170)
 	atmo.Glare = 0
-	atmo.Haze = 2
+	atmo.Haze = 1
 	atmo.Parent = Lighting
 
-	-- Sky – dark starry sky (use Roblox default skybox textures cleared = black sky)
+	-- Sky – default Roblox sky (clear blue with sun)
 	local sky = Instance.new("Sky")
-	sky.StarCount = 5000
+	sky.StarCount = 3000
 	sky.CelestialBodiesShown = true
 	sky.MoonAngularSize = 11
-	sky.SunAngularSize = 10
-	-- Clear all skybox faces so we get a clean dark sky
-	sky.SkyboxBk = ""
-	sky.SkyboxDn = ""
-	sky.SkyboxFt = ""
-	sky.SkyboxLf = ""
-	sky.SkyboxRt = ""
-	sky.SkyboxUp = ""
+	sky.SunAngularSize = 21
 	sky.Parent = Lighting
 
-	-- Bloom for neon glow effect
+	-- Bloom for neon glow on arena borders and pillars
 	local bloom = Instance.new("BloomEffect")
-	bloom.Intensity = 0.4
-	bloom.Size = 30
-	bloom.Threshold = 1.5
+	bloom.Intensity = 0.3
+	bloom.Size = 24
+	bloom.Threshold = 2
 	bloom.Parent = Lighting
 
-	-- Color correction – slight blue tint for ninja arena feel
+	-- Subtle color correction – slight cool tint for ninja arena feel
 	local cc = Instance.new("ColorCorrectionEffect")
-	cc.Brightness = 0
-	cc.Contrast = 0.1
-	cc.Saturation = 0.15
-	cc.TintColor = Color3.fromRGB(230, 230, 255)
+	cc.Brightness = 0.05
+	cc.Contrast = 0.05
+	cc.Saturation = 0.1
+	cc.TintColor = Color3.fromRGB(240, 240, 255)
 	cc.Parent = Lighting
 
 	print("[ArenaBuilder] Environment configured (old place settings cleared)")
