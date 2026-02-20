@@ -1,7 +1,8 @@
 --[[
 	UIController (Client)
 	Manages all HUD elements: health bar, stamina bar, ability cooldowns,
-	ultimate meter, round score, and queue UI.
+	ultimate meter, dash cooldowns, ragdoll indicator, critical hit flash,
+	round score, and queue UI.
 ]]
 
 local Players = game:GetService("Players")
@@ -242,6 +243,118 @@ local function createHUD()
 	announcement.Visible = false
 	announcement.Parent = screenGui
 
+	-- ===== DASH COOLDOWN INDICATORS (above abilities, left side) =====
+	local dashFrame = Instance.new("Frame")
+	dashFrame.Name = "DashFrame"
+	dashFrame.Size = UDim2.new(0, 180, 0, 24)
+	dashFrame.Position = UDim2.new(0.5, -90, 0.84, -8)
+	dashFrame.BackgroundTransparency = 1
+	dashFrame.Parent = screenGui
+
+	local dashLayout = Instance.new("UIListLayout")
+	dashLayout.FillDirection = Enum.FillDirection.Horizontal
+	dashLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	dashLayout.Padding = UDim.new(0, 8)
+	dashLayout.Parent = dashFrame
+
+	-- Forward/Back dash indicator
+	local fbDash = Instance.new("Frame")
+	fbDash.Name = "FBDashCooldown"
+	fbDash.Size = UDim2.new(0, 80, 0, 20)
+	fbDash.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+	fbDash.BorderSizePixel = 0
+	fbDash.Parent = dashFrame
+
+	local fbCorner = Instance.new("UICorner")
+	fbCorner.CornerRadius = UDim.new(0, 4)
+	fbCorner.Parent = fbDash
+
+	local fbBar = Instance.new("Frame")
+	fbBar.Name = "Bar"
+	fbBar.Size = UDim2.new(1, 0, 1, 0)
+	fbBar.BackgroundColor3 = Color3.fromRGB(200, 160, 50)
+	fbBar.BorderSizePixel = 0
+	fbBar.Parent = fbDash
+
+	local fbBarCorner = Instance.new("UICorner")
+	fbBarCorner.CornerRadius = UDim.new(0, 4)
+	fbBarCorner.Parent = fbBar
+
+	local fbLabel = Instance.new("TextLabel")
+	fbLabel.Name = "Label"
+	fbLabel.Size = UDim2.new(1, 0, 1, 0)
+	fbLabel.BackgroundTransparency = 1
+	fbLabel.Text = "Q Dash"
+	fbLabel.TextColor3 = Color3.new(1, 1, 1)
+	fbLabel.TextScaled = true
+	fbLabel.Font = Enum.Font.GothamBold
+	fbLabel.ZIndex = 2
+	fbLabel.Parent = fbDash
+
+	-- Side dash indicator
+	local sideDash = Instance.new("Frame")
+	sideDash.Name = "SideDashCooldown"
+	sideDash.Size = UDim2.new(0, 80, 0, 20)
+	sideDash.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+	sideDash.BorderSizePixel = 0
+	sideDash.Parent = dashFrame
+
+	local sideCorner = Instance.new("UICorner")
+	sideCorner.CornerRadius = UDim.new(0, 4)
+	sideCorner.Parent = sideDash
+
+	local sideBar = Instance.new("Frame")
+	sideBar.Name = "Bar"
+	sideBar.Size = UDim2.new(1, 0, 1, 0)
+	sideBar.BackgroundColor3 = Color3.fromRGB(100, 180, 220)
+	sideBar.BorderSizePixel = 0
+	sideBar.Parent = sideDash
+
+	local sideBarCorner = Instance.new("UICorner")
+	sideBarCorner.CornerRadius = UDim.new(0, 4)
+	sideBarCorner.Parent = sideBar
+
+	local sideLabel = Instance.new("TextLabel")
+	sideLabel.Name = "Label"
+	sideLabel.Size = UDim2.new(1, 0, 1, 0)
+	sideLabel.BackgroundTransparency = 1
+	sideLabel.Text = "Side"
+	sideLabel.TextColor3 = Color3.new(1, 1, 1)
+	sideLabel.TextScaled = true
+	sideLabel.Font = Enum.Font.GothamBold
+	sideLabel.ZIndex = 2
+	sideLabel.Parent = sideDash
+
+	-- ===== RAGDOLL INDICATOR (center screen, shows when ragdolled) =====
+	local ragdollLabel = Instance.new("TextLabel")
+	ragdollLabel.Name = "RagdollLabel"
+	ragdollLabel.Size = UDim2.new(0, 300, 0, 40)
+	ragdollLabel.Position = UDim2.new(0.5, -150, 0.6, 0)
+	ragdollLabel.BackgroundTransparency = 1
+	ragdollLabel.Text = "RAGDOLLED - Press Q+A/D to recover!"
+	ragdollLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+	ragdollLabel.TextStrokeTransparency = 0.5
+	ragdollLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	ragdollLabel.TextScaled = true
+	ragdollLabel.Font = Enum.Font.GothamBold
+	ragdollLabel.Visible = false
+	ragdollLabel.Parent = screenGui
+
+	-- ===== CRITICAL HIT INDICATOR (below stamina, shows when you have critical buff) =====
+	local critLabel = Instance.new("TextLabel")
+	critLabel.Name = "CriticalLabel"
+	critLabel.Size = UDim2.new(0, 200, 0, 20)
+	critLabel.Position = UDim2.new(0.5, -100, 0.11, 0)
+	critLabel.BackgroundTransparency = 1
+	critLabel.Text = "CRITICAL HIT READY!"
+	critLabel.TextColor3 = Color3.fromRGB(255, 240, 100)
+	critLabel.TextStrokeTransparency = 0.3
+	critLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	critLabel.TextScaled = true
+	critLabel.Font = Enum.Font.GothamBold
+	critLabel.Visible = false
+	critLabel.Parent = screenGui
+
 	-- ===== QUEUE BUTTON (lobby) =====
 	local queueButton = Instance.new("TextButton")
 	queueButton.Name = "QueueButton"
@@ -403,6 +516,53 @@ end)
 
 Remotes.Combat.CooldownStart.OnClientEvent:Connect(function(slot, duration)
 	startCooldownVisual(slot, duration)
+end)
+
+-- Ragdoll indicator
+Remotes.Combat.Ragdoll.OnClientEvent:Connect(function(victim, ragdolled, duration)
+	if victim == player then
+		local label = getElement("RagdollLabel")
+		if label then
+			label.Visible = ragdolled
+		end
+	end
+end)
+
+-- Perfect block → show critical indicator
+Remotes.Combat.PerfectBlock.OnClientEvent:Connect(function(blocker)
+	if blocker == player then
+		local label = getElement("CriticalLabel")
+		if label then
+			label.Visible = true
+			label.Text = "CRITICAL HIT READY!"
+			label.TextColor3 = Color3.fromRGB(255, 240, 100)
+		end
+
+		-- Flash the screen briefly
+		local announcement = getElement("Announcement")
+		if announcement then
+			announcement.Text = "PERFECT BLOCK!"
+			announcement.TextColor3 = Color3.fromRGB(200, 220, 255)
+			announcement.Visible = true
+			task.delay(0.8, function()
+				if announcement and announcement.Text == "PERFECT BLOCK!" then
+					announcement.Visible = false
+					announcement.TextColor3 = Color3.fromRGB(255, 255, 255)
+				end
+			end)
+		end
+	end
+end)
+
+-- Critical hit / Black Flash notification
+Remotes.Combat.CriticalHit.OnClientEvent:Connect(function(attacker, hitType)
+	if attacker == player then
+		-- We used our critical, hide the indicator
+		local label = getElement("CriticalLabel")
+		if label then
+			label.Visible = false
+		end
+	end
 end)
 
 -- Match events

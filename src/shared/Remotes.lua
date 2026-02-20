@@ -58,7 +58,7 @@ Remotes.Combat = {
 	UseAbility    = getOrCreateRemote(combatFolder, "UseAbility"),
 	-- Client -> Server: player started/stopped blocking
 	Block         = getOrCreateRemote(combatFolder, "Block"),
-	-- Client -> Server: player dashed
+	-- Client -> Server: player dashed (direction + dash type)
 	Dash          = getOrCreateRemote(combatFolder, "Dash"),
 	-- Server -> Client: apply hit effect / damage number
 	HitEffect     = getOrCreateRemote(combatFolder, "HitEffect"),
@@ -71,9 +71,20 @@ Remotes.Combat = {
 	-- Server -> Client: cooldown started for an ability
 	CooldownStart = getOrCreateRemote(combatFolder, "CooldownStart"),
 	-- Server -> All Clients: broadcast a combat action for VFX/sound
-	-- Args: (actingPlayer, actionType, data)
-	-- actionType: "M1", "Ability", "Dash", "BlockStart", "BlockEnd"
+	-- actionType: "M1", "Ability", "Dash", "BlockStart", "BlockEnd",
+	--             "Uppercut", "Downslam", "ForwardDashAttack"
 	ActionVFX = getOrCreateRemote(combatFolder, "ActionVFX"),
+
+	-- Server -> Client: ragdoll state change (victim, isRagdolled, duration)
+	Ragdoll       = getOrCreateRemote(combatFolder, "Ragdoll"),
+	-- Server -> Client: hitstun applied (victim, duration)
+	Hitstun       = getOrCreateRemote(combatFolder, "Hitstun"),
+	-- Server -> Client: perfect block occurred (blocker)
+	PerfectBlock  = getOrCreateRemote(combatFolder, "PerfectBlock"),
+	-- Server -> Client: critical hit landed (attacker, isCritical or isBlackFlash)
+	CriticalHit   = getOrCreateRemote(combatFolder, "CriticalHit"),
+	-- Server -> Client: hit-stop freeze frame (duration)
+	HitStop       = getOrCreateRemote(combatFolder, "HitStop"),
 }
 
 --------------------------------------------------------------------------------

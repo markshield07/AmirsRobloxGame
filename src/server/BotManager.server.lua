@@ -249,6 +249,17 @@ local function updateBotAI(aiState, dt)
 	-- Get bot's combat state from CombatAPI
 	local combatState = CombatAPI.GetPlayerState and CombatAPI.GetPlayerState(bot)
 
+	-- Check if bot is ragdolled — try to dash-cancel
+	if combatState and combatState.IsRagdolled then
+		if currentTime > (combatState.RagdollCancelReady or 0) then
+			-- Side/back dash to cancel ragdoll
+			local sideDir = botRoot.CFrame.RightVector * (math.random() > 0.5 and 1 or -1)
+			CombatAPI.BotDash(bot, sideDir, "side")
+			aiState.NextActionTime = currentTime + 0.5
+		end
+		return
+	end
+
 	-- Decide action based on distance and randomness
 	local action = math.random(1, 100)
 
@@ -258,25 +269,26 @@ local function updateBotAI(aiState, dt)
 			-- M1 attack (most common in melee)
 			CombatAPI.BotAttack(bot)
 			aiState.NextActionTime = currentTime + CombatConfig.M1.HitCooldown + 0.05
-		elseif action <= 65 then
-			-- Use Q ability
-			CombatAPI.BotUseAbility(bot, "Q")
-			aiState.NextActionTime = currentTime + 1.0
-		elseif action <= 75 then
+		elseif action <= 62 then
 			-- Use E ability
 			CombatAPI.BotUseAbility(bot, "E")
 			aiState.NextActionTime = currentTime + 1.2
-		elseif action <= 82 then
-			-- Block briefly
+		elseif action <= 72 then
+			-- Block briefly (sometimes timing it well → perfect block)
 			CombatAPI.BotBlock(bot, true)
 			aiState.NextActionTime = currentTime + 0.3
-			task.delay(math.random() * 0.8 + 0.4, function()
+			task.delay(math.random() * 0.6 + 0.3, function()
 				CombatAPI.BotBlock(bot, false)
 			end)
-		elseif action <= 88 then
+		elseif action <= 80 then
 			-- Use R ability
 			CombatAPI.BotUseAbility(bot, "R")
 			aiState.NextActionTime = currentTime + 1.5
+		elseif action <= 88 then
+			-- Side dash (evasion)
+			local sideDir = botRoot.CFrame.RightVector * (math.random() > 0.5 and 1 or -1)
+			CombatAPI.BotDash(bot, sideDir, "side")
+			aiState.NextActionTime = currentTime + 0.4
 		else
 			-- Try ultimate if charged
 			CombatAPI.BotUseAbility(bot, "F")
@@ -284,26 +296,33 @@ local function updateBotAI(aiState, dt)
 		end
 	elseif distance <= 20 then
 		-- Medium range — approach or use ranged abilities
-		if action <= 40 then
-			-- Close the gap (just wait, movement handles it)
-			aiState.NextActionTime = currentTime + 0.3
-		elseif action <= 60 then
+		if action <= 35 then
+			-- Forward dash (closes gap + attacks)
+			local dashDir = (targetRoot.Position - botRoot.Position).Unit
+			CombatAPI.BotDash(bot, dashDir, "forward")
+			aiState.NextActionTime = currentTime + 0.6
+		elseif action <= 55 then
 			-- Use E (usually ranged)
 			CombatAPI.BotUseAbility(bot, "E")
 			aiState.NextActionTime = currentTime + 1.2
-		elseif action <= 75 then
-			-- Use Q (gap closer)
+		elseif action <= 70 then
+			-- Close the gap (just wait, movement handles it)
+			aiState.NextActionTime = currentTime + 0.3
+		else
+			-- Use Q (gap closer ability)
 			CombatAPI.BotUseAbility(bot, "Q")
 			aiState.NextActionTime = currentTime + 0.8
-		else
-			-- Dash forward
-			local dashDir = (targetRoot.Position - botRoot.Position).Unit
-			CombatAPI.BotDash(bot, dashDir)
-			aiState.NextActionTime = currentTime + 0.5
 		end
 	else
 		-- Far range — close distance
-		aiState.NextActionTime = currentTime + 0.3
+		-- Sometimes forward dash
+		if action <= 30 then
+			local dashDir = (targetRoot.Position - botRoot.Position).Unit
+			CombatAPI.BotDash(bot, dashDir, "forward")
+			aiState.NextActionTime = currentTime + 0.6
+		else
+			aiState.NextActionTime = currentTime + 0.3
+		end
 	end
 end
 
