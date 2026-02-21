@@ -1,6 +1,6 @@
 --[[
 	BotManager (Server)
-	Spawns NPC bot characters and runs simple AI for practice mode.
+	Spawns NPC bot characters and runs simple AI for free-for-all combat.
 	The bot uses the same combat system as real players via BotPlayer wrapper.
 ]]
 
@@ -10,7 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CombatConfig = require(Shared:WaitForChild("CombatConfig"))
-local NinjaData = require(Shared:WaitForChild("NinjaData"))
+local CharacterData = require(Shared:WaitForChild("CharacterData"))
 local CombatAPI = require(Shared:WaitForChild("CombatAPI"))
 local BotPlayer = require(Shared:WaitForChild("BotPlayer"))
 
@@ -18,15 +18,18 @@ local BotPlayer = require(Shared:WaitForChild("BotPlayer"))
 -- BOT CHARACTER CREATION
 --------------------------------------------------------------------------------
 
--- Create a minimal R6 character rig for the bot
-local function createBotCharacter(name, ninjaKey)
-	local ninja = NinjaData.GetNinja(ninjaKey) or NinjaData.FlameShadow
-	local color = ninja.Colors.Primary
+local function createBotCharacter(name, characterKey)
+	local charData = CharacterData.GetCharacter(characterKey)
+	if not charData then
+		characterKey = "StrongestHero"
+		charData = CharacterData.StrongestHero
+	end
+	local color = charData.BodyColor or charData.Colors.Primary
 
 	local model = Instance.new("Model")
 	model.Name = name
 
-	-- HumanoidRootPart (required for combat — hit detection, position, knockback)
+	-- HumanoidRootPart
 	local rootPart = Instance.new("Part")
 	rootPart.Name = "HumanoidRootPart"
 	rootPart.Size = Vector3.new(2, 2, 1)
@@ -45,7 +48,6 @@ local function createBotCharacter(name, ninjaKey)
 	torso.CanCollide = true
 	torso.Parent = model
 
-	-- Weld torso to root
 	local torsoWeld = Instance.new("Weld")
 	torsoWeld.Part0 = rootPart
 	torsoWeld.Part1 = torso
@@ -57,7 +59,7 @@ local function createBotCharacter(name, ninjaKey)
 	head.Name = "Head"
 	head.Shape = Enum.PartType.Ball
 	head.Size = Vector3.new(1.5, 1.5, 1.5)
-	head.Color = Color3.fromRGB(245, 205, 170) -- skin tone
+	head.Color = Color3.fromRGB(245, 205, 170)
 	head.Material = Enum.Material.SmoothPlastic
 	head.Anchored = false
 	head.CanCollide = false
@@ -133,14 +135,14 @@ local function createBotCharacter(name, ninjaKey)
 	rightLegWeld.C0 = CFrame.new(0.5, -2, 0)
 	rightLegWeld.Parent = torso
 
-	-- Humanoid (needed for the character to function)
+	-- Humanoid
 	local humanoid = Instance.new("Humanoid")
 	humanoid.MaxHealth = CombatConfig.MaxHealth
 	humanoid.Health = CombatConfig.MaxHealth
-	humanoid.WalkSpeed = 16
+	humanoid.WalkSpeed = CombatConfig.Movement.WalkSpeed
 	humanoid.Parent = model
 
-	-- Name tag above head
+	-- Name tag
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "NameTag"
 	billboard.Size = UDim2.new(0, 100, 0, 30)
@@ -160,7 +162,6 @@ local function createBotCharacter(name, ninjaKey)
 	nameLabel.Font = Enum.Font.GothamBold
 	nameLabel.Parent = billboard
 
-	-- Set PrimaryPart
 	model.PrimaryPart = rootPart
 
 	return model
@@ -170,16 +171,18 @@ end
 -- BOT AI
 --------------------------------------------------------------------------------
 
-local activeBots = {} -- [botPlayer] = { state data for AI }
+local activeBots = {}
 
-local function startBotAI(botPlayer, humanPlayer)
+local MOVE_SLOTS = { "E", "R", "T", "G" }
+
+local function startBotAI(botPlayer, targetPlayer)
 	local aiState = {
 		Bot = botPlayer,
-		Target = humanPlayer,
-		NextActionTime = os.clock() + 1.5, -- wait before first action
+		Target = targetPlayer,
+		NextActionTime = os.clock() + 1.5,
 		CurrentAction = "idle",
 		ActionEndTime = 0,
-		MoveDirection = 0, -- -1 = left, 0 = none, 1 = right
+		MoveDirection = 0,
 		NextMoveChange = 0,
 	}
 	activeBots[botPlayer] = aiState
@@ -189,13 +192,11 @@ local function stopBotAI(botPlayer)
 	activeBots[botPlayer] = nil
 end
 
--- AI decision-making (called each frame)
 local function updateBotAI(aiState, dt)
 	local bot = aiState.Bot
 	local target = aiState.Target
 	local currentTime = os.clock()
 
-	-- Get positions
 	local botChar = bot.Character
 	local targetChar = target.Character
 	if not botChar or not targetChar then return end
@@ -206,21 +207,19 @@ local function updateBotAI(aiState, dt)
 
 	local distance = (botRoot.Position - targetRoot.Position).Magnitude
 
-	-- Face the player
+	-- Face the target
 	local lookDir = (targetRoot.Position - botRoot.Position)
 	lookDir = Vector3.new(lookDir.X, 0, lookDir.Z)
 	if lookDir.Magnitude > 0.1 then
 		botRoot.CFrame = CFrame.new(botRoot.Position, botRoot.Position + lookDir.Unit)
 	end
 
-	-- Move towards player if too far, strafe if close
+	-- Movement
 	local humanoid = botChar:FindFirstChild("Humanoid")
 	if humanoid then
 		if distance > 12 then
-			-- Walk towards player
 			humanoid:MoveTo(targetRoot.Position)
 		elseif distance > 6 then
-			-- Close range — sometimes strafe, sometimes approach
 			if currentTime > aiState.NextMoveChange then
 				aiState.MoveDirection = math.random(-1, 1)
 				aiState.NextMoveChange = currentTime + math.random() * 1.5 + 0.5
@@ -233,7 +232,6 @@ local function updateBotAI(aiState, dt)
 				humanoid:MoveTo(targetRoot.Position)
 			end
 		else
-			-- Very close — hold position or back up slightly
 			if currentTime > aiState.NextMoveChange then
 				aiState.MoveDirection = math.random(-1, 1)
 				aiState.NextMoveChange = currentTime + math.random() * 1 + 0.3
@@ -243,79 +241,80 @@ local function updateBotAI(aiState, dt)
 		end
 	end
 
-	-- Combat actions (only when action timer is ready)
+	-- Combat actions
 	if currentTime < aiState.NextActionTime then return end
 
-	-- Get bot's combat state from CombatAPI
 	local combatState = CombatAPI.GetPlayerState and CombatAPI.GetPlayerState(bot)
 
-	-- Check if bot is ragdolled — try to dash-cancel
+	-- Try to evasive-cancel out of ragdoll
 	if combatState and combatState.IsRagdolled then
 		if currentTime > (combatState.RagdollCancelReady or 0) then
-			-- Side/back dash to cancel ragdoll
-			local sideDir = botRoot.CFrame.RightVector * (math.random() > 0.5 and 1 or -1)
-			CombatAPI.BotDash(bot, sideDir, "side")
+			CombatAPI.BotEvasive(bot)
 			aiState.NextActionTime = currentTime + 0.5
 		end
 		return
 	end
 
-	-- Decide action based on distance and randomness
 	local action = math.random(1, 100)
 
 	if distance <= CombatConfig.M1.HitRange then
 		-- In melee range
-		if action <= 50 then
-			-- M1 attack (most common in melee)
+		if action <= 45 then
+			-- M1 attack
 			CombatAPI.BotAttack(bot)
-			aiState.NextActionTime = currentTime + CombatConfig.M1.HitCooldown + 0.05
-		elseif action <= 62 then
-			-- Use E ability
-			CombatAPI.BotUseAbility(bot, "E")
+			aiState.NextActionTime = currentTime + (CombatConfig.M1.BaseHitCooldown or 0.35) + 0.05
+		elseif action <= 57 then
+			-- Use E move
+			CombatAPI.BotUseMove(bot, "E")
 			aiState.NextActionTime = currentTime + 1.2
-		elseif action <= 72 then
-			-- Block briefly (sometimes timing it well → perfect block)
+		elseif action <= 67 then
+			-- Block briefly
 			CombatAPI.BotBlock(bot, true)
 			aiState.NextActionTime = currentTime + 0.3
 			task.delay(math.random() * 0.6 + 0.3, function()
 				CombatAPI.BotBlock(bot, false)
 			end)
-		elseif action <= 80 then
-			-- Use R ability
-			CombatAPI.BotUseAbility(bot, "R")
+		elseif action <= 75 then
+			-- Use R move
+			CombatAPI.BotUseMove(bot, "R")
 			aiState.NextActionTime = currentTime + 1.5
+		elseif action <= 82 then
+			-- Evasive dodge
+			CombatAPI.BotEvasive(bot)
+			aiState.NextActionTime = currentTime + 0.5
 		elseif action <= 88 then
-			-- Side dash (evasion)
+			-- Side dash
 			local sideDir = botRoot.CFrame.RightVector * (math.random() > 0.5 and 1 or -1)
 			CombatAPI.BotDash(bot, sideDir, "side")
 			aiState.NextActionTime = currentTime + 0.4
-		else
-			-- Try ultimate if charged
-			CombatAPI.BotUseAbility(bot, "F")
+		elseif action <= 94 then
+			-- Use T move
+			CombatAPI.BotUseMove(bot, "T")
 			aiState.NextActionTime = currentTime + 1.5
+		else
+			-- Use G move (heavy)
+			CombatAPI.BotUseMove(bot, "G")
+			aiState.NextActionTime = currentTime + 2.0
 		end
 	elseif distance <= 20 then
-		-- Medium range — approach or use ranged abilities
+		-- Medium range
 		if action <= 35 then
-			-- Forward dash (closes gap + attacks)
 			local dashDir = (targetRoot.Position - botRoot.Position).Unit
 			CombatAPI.BotDash(bot, dashDir, "forward")
 			aiState.NextActionTime = currentTime + 0.6
 		elseif action <= 55 then
-			-- Use E (usually ranged)
-			CombatAPI.BotUseAbility(bot, "E")
+			-- Use E (often ranged or gap-closer)
+			CombatAPI.BotUseMove(bot, "E")
 			aiState.NextActionTime = currentTime + 1.2
 		elseif action <= 70 then
-			-- Close the gap (just wait, movement handles it)
 			aiState.NextActionTime = currentTime + 0.3
 		else
-			-- Use Q (gap closer ability)
-			CombatAPI.BotUseAbility(bot, "Q")
-			aiState.NextActionTime = currentTime + 0.8
+			-- Use T move
+			CombatAPI.BotUseMove(bot, "T")
+			aiState.NextActionTime = currentTime + 1.0
 		end
 	else
 		-- Far range — close distance
-		-- Sometimes forward dash
 		if action <= 30 then
 			local dashDir = (targetRoot.Position - botRoot.Position).Unit
 			CombatAPI.BotDash(bot, dashDir, "forward")
@@ -329,7 +328,6 @@ end
 -- Run AI every frame
 RunService.Heartbeat:Connect(function(dt)
 	for botPlayer, aiState in pairs(activeBots) do
-		-- Check if bot is still alive
 		if not botPlayer.Character or not botPlayer.Character:FindFirstChild("HumanoidRootPart") then
 			continue
 		end
@@ -338,25 +336,25 @@ RunService.Heartbeat:Connect(function(dt)
 end)
 
 --------------------------------------------------------------------------------
--- BOT MANAGER API (exposed via CombatAPI for MatchManager)
+-- BOT MANAGER API (exposed via CombatAPI for GameManager)
 --------------------------------------------------------------------------------
 
--- Spawn a bot and return the BotPlayer wrapper
-local function spawnBot(ninjaKey, position)
-	local ninja = NinjaData.GetNinja(ninjaKey) or NinjaData.FlameShadow
-	local botName = ninja.DisplayName .. " (Bot)"
+local function spawnBot(characterKey, position)
+	local charData = CharacterData.GetCharacter(characterKey)
+	if not charData then
+		characterKey = "StrongestHero"
+		charData = CharacterData.StrongestHero
+	end
+	local botName = charData.DisplayName .. " (Bot)"
 
-	-- Create the character model
-	local character = createBotCharacter(botName, ninjaKey)
+	local character = createBotCharacter(botName, characterKey)
 	character.Parent = game:GetService("Workspace")
 
-	-- Position the character
 	local root = character:FindFirstChild("HumanoidRootPart")
 	if root then
 		root.CFrame = CFrame.new(position)
 	end
 
-	-- Create the BotPlayer wrapper
 	local botPlayer = BotPlayer.new(botName, character)
 
 	return botPlayer
@@ -371,7 +369,7 @@ local function destroyBot(botPlayer)
 	botPlayer.Parent = nil
 end
 
--- Register bot functions on CombatAPI so MatchManager can use them
+-- Register bot functions on CombatAPI so GameManager can use them
 CombatAPI.SpawnBot = spawnBot
 CombatAPI.DestroyBot = destroyBot
 CombatAPI.StartBotAI = startBotAI

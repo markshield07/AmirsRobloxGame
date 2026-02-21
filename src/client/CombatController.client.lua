@@ -1,13 +1,14 @@
 --[[
 	CombatController (Client)
 	TSB-style input handling:
-	  - M1 attack with jump-held tracking (for uppercut)
-	  - Q + WASD directional dashes (forward/back share CD, side is independent)
-	  - Ragdoll cancel (side/back dash while ragdolled)
-	  - Perfect block visual/audio feedback
-	  - Critical/Black Flash VFX + sounds
-	  - Hit-stop freeze frames
-	  - Directional screen shake
+	  - M1 attack (left click)
+	  - Block (F key hold)
+	  - Evasive dodge (Q key)
+	  - Moves (E/R/T keys)
+	  - Awakening (G key)
+	  - Sprint (shift hold)
+	  - Dash (shift + direction)
+	  - Ragdoll cancel (Q while ragdolled)
 ]]
 
 local Players = game:GetService("Players")
@@ -16,7 +17,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CombatConfig = require(Shared:WaitForChild("CombatConfig"))
-local NinjaData = require(Shared:WaitForChild("NinjaData"))
+local CharacterData = require(Shared:WaitForChild("CharacterData"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local CombatVFX = require(Shared:WaitForChild("CombatVFX"))
 local SoundBank = require(Shared:WaitForChild("SoundBank"))
@@ -29,28 +30,27 @@ local mouse = player:GetMouse()
 --------------------------------------------------------------------------------
 
 local isBlocking = false
-local isInMatch = false
 local isRagdolled = false
+local isSprinting = false
+local isInArena = false
 
--- Ninja tracking
-local myNinjaKey = "FlameShadow"
-local myElement = "Fire"
+local myCharacterKey = "StrongestHero"
+local myCharData = CharacterData.StrongestHero
 
--- M1 combo tracking (client-side for VFX only)
+-- M1 combo (client-side for VFX only)
 local localComboIndex = 0
 local lastLocalM1Time = 0
 
--- Dash cooldowns (mirrored locally for responsiveness)
+-- Cooldowns (mirrored locally)
+local evasiveCooldownEnd = 0
 local forwardBackCooldownEnd = 0
 local sideCooldownEnd = 0
+local moveCooldowns = { E = 0, R = 0, T = 0, G = 0 }
 
--- Ability cooldowns
-local abilityCooldowns = { Q = 0, E = 0, R = 0, F = 0 }
-
--- Jump tracking (for uppercut detection)
+-- Jump tracking
 local isJumpHeld = false
 
--- Movement key tracking (for dash direction)
+-- Movement keys
 local keysHeld = {
 	[Enum.KeyCode.W] = false,
 	[Enum.KeyCode.A] = false,
@@ -70,25 +70,6 @@ local function getMyCharacter()
 	return player.Character
 end
 
-local function getMoveDirection()
-	local char = player.Character
-	if not char then return Vector3.new(0, 0, -1) end
-	local humanoid = char:FindFirstChild("Humanoid")
-	if humanoid and humanoid.MoveDirection.Magnitude > 0 then
-		return humanoid.MoveDirection
-	end
-	local root = char:FindFirstChild("HumanoidRootPart")
-	if root then
-		return root.CFrame.LookVector
-	end
-	return Vector3.new(0, 0, -1)
-end
-
-local function canUseAbility(slot)
-	return now() >= abilityCooldowns[slot]
-end
-
--- Determine dash type from currently held movement keys
 local function getDashType()
 	local w = keysHeld[Enum.KeyCode.W]
 	local s = keysHeld[Enum.KeyCode.S]
@@ -97,11 +78,9 @@ local function getDashType()
 
 	if s and not w then return "back" end
 	if (a or d) and not w and not s then return "side" end
-	-- Default to forward (W held, or no keys, or W + side)
 	return "forward"
 end
 
--- Get dash direction vector based on dash type
 local function getDashDirection(dashType)
 	local char = player.Character
 	if not char then return Vector3.new(0, 0, -1) end
@@ -110,50 +89,49 @@ local function getDashDirection(dashType)
 
 	local camera = workspace.CurrentCamera
 	local camLook = camera and camera.CFrame.LookVector or root.CFrame.LookVector
-	-- Flatten to horizontal
 	local forward = Vector3.new(camLook.X, 0, camLook.Z).Unit
 	local right = forward:Cross(Vector3.new(0, 1, 0)).Unit
 
-	if dashType == "forward" then
-		return forward
-	elseif dashType == "back" then
-		return -forward
+	if dashType == "forward" then return forward
+	elseif dashType == "back" then return -forward
 	elseif dashType == "side" then
-		if keysHeld[Enum.KeyCode.A] then
-			return right  -- left from camera perspective = right cross product
-		elseif keysHeld[Enum.KeyCode.D] then
-			return -right
-		end
-		-- Default side: use move direction
-		local moveDir = getMoveDirection()
-		if moveDir.Magnitude > 0 then return moveDir end
+		if keysHeld[Enum.KeyCode.A] then return right
+		elseif keysHeld[Enum.KeyCode.D] then return -right end
 		return right
 	end
-
 	return forward
 end
 
--- Resolve character model for other players (handles bot references)
-local function resolveCharacter(actionPlayer)
-	if typeof(actionPlayer) == "Instance" and actionPlayer:IsA("Player") then
-		return actionPlayer.Character
-	end
-	return nil
+local function getEvasiveDirection()
+	local char = player.Character
+	if not char then return Vector3.new(1, 0, 0) end
+	local root = char:FindFirstChild("HumanoidRootPart")
+	if not root then return Vector3.new(1, 0, 0) end
+
+	local camera = workspace.CurrentCamera
+	local camLook = camera and camera.CFrame.LookVector or root.CFrame.LookVector
+	local forward = Vector3.new(camLook.X, 0, camLook.Z).Unit
+	local right = forward:Cross(Vector3.new(0, 1, 0)).Unit
+
+	-- Dodge in movement direction if moving, otherwise sidestep right
+	if keysHeld[Enum.KeyCode.A] then return right
+	elseif keysHeld[Enum.KeyCode.D] then return -right
+	elseif keysHeld[Enum.KeyCode.S] then return -forward
+	elseif keysHeld[Enum.KeyCode.W] then return forward end
+	return right
 end
 
 --------------------------------------------------------------------------------
--- M1 ATTACK (Left Mouse Button / Touch Tap)
+-- M1 ATTACK (Left Mouse Button)
 --------------------------------------------------------------------------------
 
 local function onAttack()
-	if not isInMatch then return end
+	if not isInArena then return end
 	if isBlocking then return end
 	if isRagdolled then return end
 
-	-- Send attack + jump state to server
 	Remotes.Combat.Attack:FireServer(isJumpHeld)
 
-	-- Local VFX + sound for responsiveness
 	local char = getMyCharacter()
 	if char then
 		if now() - lastLocalM1Time > CombatConfig.M1.ComboResetTime then
@@ -166,60 +144,25 @@ local function onAttack()
 			localComboIndex = 1
 		end
 
-		-- Check for uppercut/downslam at finisher
-		if localComboIndex >= CombatConfig.M1.HitCount then
-			if isJumpHeld then
-				CombatVFX.playUppercut(char, myElement)
-				SoundBank:play("Uppercut")
-			else
-				CombatVFX.playM1Swing(char, localComboIndex, myElement)
-				SoundBank:play("M1Swing" .. localComboIndex)
-			end
+		if localComboIndex >= CombatConfig.M1.HitCount and isJumpHeld then
+			CombatVFX.playUppercut(char, myCharData.Colors.Primary)
+			SoundBank:play("Uppercut")
 		else
-			CombatVFX.playM1Swing(char, localComboIndex, myElement)
-			SoundBank:play("M1Swing" .. localComboIndex)
+			CombatVFX.playM1Swing(char, localComboIndex, myCharData.Colors.Primary)
+			SoundBank:play("M1Swing" .. math.min(localComboIndex, 4))
 		end
 	end
 end
 
 mouse.Button1Down:Connect(onAttack)
 
-UserInputService.TouchTap:Connect(function(touchPositions, gameProcessed)
+UserInputService.TouchTap:Connect(function(_, gameProcessed)
 	if gameProcessed then return end
 	onAttack()
 end)
 
 --------------------------------------------------------------------------------
--- BLOCK (Right Mouse Button — hold)
---------------------------------------------------------------------------------
-
-mouse.Button2Down:Connect(function()
-	if not isInMatch then return end
-	if isRagdolled then return end
-	isBlocking = true
-	Remotes.Combat.Block:FireServer(true)
-
-	local char = getMyCharacter()
-	if char then
-		CombatVFX.createBlockShield(char, myElement)
-		SoundBank:play("BlockStart")
-	end
-end)
-
-mouse.Button2Up:Connect(function()
-	if isBlocking then
-		isBlocking = false
-		Remotes.Combat.Block:FireServer(false)
-
-		local char = getMyCharacter()
-		if char then
-			CombatVFX.removeBlockShield(char)
-		end
-	end
-end)
-
---------------------------------------------------------------------------------
--- INPUT TRACKING (movement keys + jump)
+-- INPUT HANDLING
 --------------------------------------------------------------------------------
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -235,85 +178,122 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		isJumpHeld = true
 	end
 
-	if not isInMatch then return end
+	if not isInArena then return end
 
-	-- DASH: Q + direction
+	-- F: Block
+	if input.KeyCode == Enum.KeyCode.F then
+		if isRagdolled then return end
+		isBlocking = true
+		Remotes.Combat.Block:FireServer(true)
+
+		local char = getMyCharacter()
+		if char then
+			CombatVFX.createBlockShield(char, myCharData.Colors.Primary)
+			SoundBank:play("BlockStart")
+		end
+		return
+	end
+
+	-- Q: Evasive dodge
 	if input.KeyCode == Enum.KeyCode.Q then
-		local dashType = getDashType()
-
-		-- Ragdoll cancel: side/back dash while ragdolled
 		if isRagdolled then
-			if dashType == "side" or dashType == "back" then
+			-- Ragdoll cancel
+			local direction = getEvasiveDirection()
+			Remotes.Combat.Evasive:FireServer(direction)
+
+			local char = getMyCharacter()
+			if char then
+				CombatVFX.playRagdollCancel(char)
+				SoundBank:play("RagdollCancel")
+			end
+			isRagdolled = false
+			return
+		end
+
+		if isBlocking then return end
+		if now() < evasiveCooldownEnd then return end
+
+		evasiveCooldownEnd = now() + CombatConfig.Evasive.Cooldown
+		local direction = getEvasiveDirection()
+		Remotes.Combat.Evasive:FireServer(direction)
+
+		local char = getMyCharacter()
+		if char then
+			CombatVFX.playDash(char, direction, myCharData.Colors.Primary, "side")
+			SoundBank:play("DashWhoosh")
+		end
+		return
+	end
+
+	-- Shift: Sprint / Dash
+	if input.KeyCode == Enum.KeyCode.LeftShift then
+		if isBlocking or isRagdolled then return end
+
+		-- If holding a direction, do a dash
+		local anyMovement = keysHeld[Enum.KeyCode.W] or keysHeld[Enum.KeyCode.S]
+			or keysHeld[Enum.KeyCode.A] or keysHeld[Enum.KeyCode.D]
+
+		if anyMovement then
+			local dashType = getDashType()
+			local canDash = false
+
+			if dashType == "forward" or dashType == "back" then
+				canDash = now() >= forwardBackCooldownEnd
+				if canDash then
+					forwardBackCooldownEnd = now() + CombatConfig.Dash.ForwardCooldown
+				end
+			else
+				canDash = now() >= sideCooldownEnd
+				if canDash then
+					sideCooldownEnd = now() + CombatConfig.Dash.SideCooldown
+				end
+			end
+
+			if canDash then
 				local direction = getDashDirection(dashType)
 				Remotes.Combat.Dash:FireServer(direction, dashType)
 
 				local char = getMyCharacter()
 				if char then
-					CombatVFX.playRagdollCancel(char)
-					CombatVFX.playDash(char, direction, myElement, dashType)
-					SoundBank:play("RagdollCancel")
-				end
-				isRagdolled = false
-			end
-			return
-		end
-
-		if isBlocking then return end
-
-		-- Check local cooldown
-		local canDash = false
-		if dashType == "forward" or dashType == "back" then
-			canDash = now() >= forwardBackCooldownEnd
-			if canDash then
-				forwardBackCooldownEnd = now() + CombatConfig.Dash.ForwardCooldown
-			end
-		elseif dashType == "side" then
-			canDash = now() >= sideCooldownEnd
-			if canDash then
-				sideCooldownEnd = now() + CombatConfig.Dash.SideCooldown
-			end
-		end
-
-		if canDash then
-			local direction = getDashDirection(dashType)
-			Remotes.Combat.Dash:FireServer(direction, dashType)
-
-			local char = getMyCharacter()
-			if char then
-				CombatVFX.playDash(char, direction, myElement, dashType)
-				if dashType == "forward" then
-					SoundBank:play("ForwardDash")
-				else
-					SoundBank:play("DashWhoosh")
+					CombatVFX.playDash(char, direction, myCharData.Colors.Primary, dashType)
+					SoundBank:play(dashType == "forward" and "ForwardDash" or "DashWhoosh")
 				end
 			end
+		else
+			-- Sprint
+			isSprinting = true
+			Remotes.Combat.Sprint:FireServer(true)
 		end
 		return
 	end
 
-	-- ABILITIES: E, R, F
-	if isBlocking then return end
-	if isRagdolled then return end
-
-	local abilitySlot = nil
-	if input.KeyCode == Enum.KeyCode.E and canUseAbility("E") then
-		abilitySlot = "E"
-	elseif input.KeyCode == Enum.KeyCode.R and canUseAbility("R") then
-		abilitySlot = "R"
-	elseif input.KeyCode == Enum.KeyCode.F and canUseAbility("F") then
-		abilitySlot = "F"
+	-- G: Awakening
+	if input.KeyCode == Enum.KeyCode.G then
+		if isBlocking or isRagdolled then return end
+		Remotes.Combat.Awakening:FireServer()
+		return
 	end
 
-	if abilitySlot then
-		Remotes.Combat.UseAbility:FireServer(abilitySlot)
+	-- E/R/T: Character moves
+	if isBlocking or isRagdolled then return end
+
+	local moveSlot = nil
+	if input.KeyCode == Enum.KeyCode.E and now() >= moveCooldowns.E then
+		moveSlot = "E"
+	elseif input.KeyCode == Enum.KeyCode.R and now() >= moveCooldowns.R then
+		moveSlot = "R"
+	elseif input.KeyCode == Enum.KeyCode.T and now() >= moveCooldowns.T then
+		moveSlot = "T"
+	end
+
+	if moveSlot then
+		Remotes.Combat.UseMove:FireServer(moveSlot)
 
 		local char = getMyCharacter()
 		if char then
-			CombatVFX.playAbility(char, myNinjaKey, abilitySlot)
-			local soundName = SoundBank:getAbilitySound(myNinjaKey, abilitySlot)
-			if soundName then
-				SoundBank:play(soundName)
-			end
+			CombatVFX.playAbility(char, myCharacterKey, moveSlot)
+			local soundName = SoundBank:getAbilitySound(myCharacterKey, moveSlot)
+			if soundName then SoundBank:play(soundName) end
 		end
 	end
 end)
@@ -324,9 +304,26 @@ UserInputService.InputEnded:Connect(function(input, gameProcessed)
 		keysHeld[input.KeyCode] = false
 	end
 
-	-- Track jump release
 	if input.KeyCode == Enum.KeyCode.Space then
 		isJumpHeld = false
+	end
+
+	-- F release: stop blocking
+	if input.KeyCode == Enum.KeyCode.F then
+		if isBlocking then
+			isBlocking = false
+			Remotes.Combat.Block:FireServer(false)
+			local char = getMyCharacter()
+			if char then CombatVFX.removeBlockShield(char) end
+		end
+	end
+
+	-- Shift release: stop sprinting
+	if input.KeyCode == Enum.KeyCode.LeftShift then
+		if isSprinting then
+			isSprinting = false
+			Remotes.Combat.Sprint:FireServer(false)
+		end
 	end
 end)
 
@@ -336,15 +333,18 @@ end)
 
 -- Cooldown notification
 Remotes.Combat.CooldownStart.OnClientEvent:Connect(function(slot, duration)
-	abilityCooldowns[slot] = now() + duration
+	if slot == "Q" then
+		evasiveCooldownEnd = now() + duration
+	elseif moveCooldowns[slot] then
+		moveCooldowns[slot] = now() + duration
+	end
 end)
 
--- Hit effect (damage numbers, particles, camera shake)
-Remotes.Combat.HitEffect.OnClientEvent:Connect(function(hitPosition, damage, wasBlockBreak, attackerElement, isCritical, isBlackFlash)
+-- Hit effect
+Remotes.Combat.HitEffect.OnClientEvent:Connect(function(hitPosition, damage, wasBlockBreak, attackerColor, isCritical, isBlackFlash)
 	if hitPosition then
-		CombatVFX.playHitImpact(hitPosition, damage, attackerElement or "Fire", wasBlockBreak, isCritical, isBlackFlash)
+		CombatVFX.playHitImpact(hitPosition, damage, attackerColor, wasBlockBreak, isCritical, isBlackFlash)
 
-		-- Sound based on damage / type
 		if isBlackFlash then
 			SoundBank:playAtPosition("BlackFlash", hitPosition)
 		elseif isCritical then
@@ -359,45 +359,32 @@ Remotes.Combat.HitEffect.OnClientEvent:Connect(function(hitPosition, damage, was
 			SoundBank:playAtPosition("HitLight", hitPosition)
 		end
 
-		-- Directional screen shake if local player was hit
+		-- Directional shake if local player was hit
 		local char = getMyCharacter()
 		if char then
 			local root = char:FindFirstChild("HumanoidRootPart")
 			if root and (root.Position - hitPosition).Magnitude < 6 then
-				local shakeIntensity
-				if isBlackFlash then
-					shakeIntensity = 2.0
-				elseif isCritical then
-					shakeIntensity = 1.5
-				elseif wasBlockBreak then
-					shakeIntensity = 1.2
-				else
-					shakeIntensity = math.max(0.2, damage / 20)
-				end
-
-				-- Directional shake toward attacker
+				local intensity = isBlackFlash and 2.0 or (isCritical and 1.5 or math.max(0.2, damage / 20))
 				local attackDir = (hitPosition - root.Position)
 				if attackDir.Magnitude > 0.1 then
-					CombatVFX.directionalShake(shakeIntensity, 0.25, attackDir.Unit)
+					CombatVFX.directionalShake(intensity, 0.25, attackDir.Unit)
 				else
-					CombatVFX.cameraShake(shakeIntensity, 0.2)
+					CombatVFX.cameraShake(intensity, 0.2)
 				end
 			end
 		end
 	end
 end)
 
--- Hit-stop freeze frame
+-- Hit-stop
 Remotes.Combat.HitStop.OnClientEvent:Connect(function(duration)
 	CombatVFX.playHitStop(duration or 0.04)
 end)
 
--- Ragdoll state
-Remotes.Combat.Ragdoll.OnClientEvent:Connect(function(victim, ragdolled, duration)
-	-- Track if WE are ragdolled
+-- Ragdoll
+Remotes.Combat.Ragdoll.OnClientEvent:Connect(function(victim, ragdolled)
 	if victim == player then
 		isRagdolled = ragdolled
-
 		if ragdolled then
 			isBlocking = false
 			local char = getMyCharacter()
@@ -408,7 +395,6 @@ Remotes.Combat.Ragdoll.OnClientEvent:Connect(function(victim, ragdolled, duratio
 			end
 		end
 	else
-		-- Other player ragdolled: show VFX on their character
 		local victimChar = nil
 		if typeof(victim) == "Instance" and victim:IsA("Player") then
 			victimChar = victim.Character
@@ -431,29 +417,20 @@ Remotes.Combat.PerfectBlock.OnClientEvent:Connect(function(blocker)
 		SoundBank:play("PerfectBlock")
 	elseif typeof(blocker) == "Instance" and blocker:IsA("Player") then
 		blockerChar = blocker.Character
-		if blockerChar then
-			local root = blockerChar:FindFirstChild("HumanoidRootPart")
-			if root then
-				SoundBank:playAtPosition("PerfectBlock", root.Position)
-			end
-		end
 	end
-
 	if blockerChar then
-		CombatVFX.playPerfectBlock(blockerChar, myElement)
+		CombatVFX.playPerfectBlock(blockerChar, myCharData.Colors.Primary)
 	end
 end)
 
 -- Critical hit / Black flash
 Remotes.Combat.CriticalHit.OnClientEvent:Connect(function(attacker, hitType)
-	-- Visual indicator on the attacker's character
 	local char = nil
 	if attacker == player then
 		char = getMyCharacter()
 	elseif typeof(attacker) == "Instance" and attacker:IsA("Player") then
 		char = attacker.Character
 	end
-
 	if not char then return end
 	local root = char:FindFirstChild("HumanoidRootPart")
 	if not root then return end
@@ -465,114 +442,87 @@ Remotes.Combat.CriticalHit.OnClientEvent:Connect(function(attacker, hitType)
 	end
 end)
 
--- Action VFX broadcast (for OTHER players' actions)
+-- Awakening state
+Remotes.Combat.AwakeningState.OnClientEvent:Connect(function(targetPlayer, activated, awakeningName)
+	if targetPlayer == player then
+		if activated then
+			SoundBank:play("RoundStart") -- reuse as awakening sound
+		end
+	end
+
+	local char = nil
+	if typeof(targetPlayer) == "Instance" and targetPlayer:IsA("Player") then
+		char = targetPlayer.Character
+	end
+	if char then
+		if activated then
+			CombatVFX.impactShockwave(char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart.Position or Vector3.new(0, 0, 0), Color3.fromRGB(255, 215, 0), 20)
+		end
+	end
+end)
+
+-- Action VFX broadcast (other players' actions)
 Remotes.Combat.ActionVFX.OnClientEvent:Connect(function(actionPlayer, actionType, data)
 	if actionPlayer == player then return end
 
-	local char = resolveCharacter(actionPlayer)
-	if not char and typeof(actionPlayer) ~= "Instance" then return end
-	if not char then
+	local char = nil
+	if typeof(actionPlayer) == "Instance" and actionPlayer:IsA("Player") then
 		char = actionPlayer.Character
 	end
 	if not char then return end
 
-	local ninjaKey = data and data.Ninja or "FlameShadow"
-	local ninja = NinjaData.GetNinja(ninjaKey)
-	local element = ninja and ninja.Element or "Fire"
+	local charKey = data and data.CharKey or "StrongestHero"
+	local charInfo = CharacterData.GetCharacter(charKey)
+	local color = charInfo and charInfo.Colors.Primary or Color3.new(1, 1, 1)
 
 	if actionType == "M1" then
 		local comboIndex = data and data.ComboIndex or 1
-		CombatVFX.playM1Swing(char, comboIndex, element)
-		SoundBank:playOnPart("M1Swing" .. math.min(comboIndex, 4), char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
-
+		CombatVFX.playM1Swing(char, comboIndex, color)
+		SoundBank:playOnPart("M1Swing" .. math.min(comboIndex, 4), char:FindFirstChild("HumanoidRootPart"))
 	elseif actionType == "Uppercut" then
-		CombatVFX.playUppercut(char, element)
-		SoundBank:playOnPart("Uppercut", char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
-
+		CombatVFX.playUppercut(char, color)
+		SoundBank:playOnPart("Uppercut", char:FindFirstChild("HumanoidRootPart"))
 	elseif actionType == "Downslam" then
-		CombatVFX.playDownslam(char, element)
-		SoundBank:playOnPart("Downslam", char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
-
+		CombatVFX.playDownslam(char, color)
+		SoundBank:playOnPart("Downslam", char:FindFirstChild("HumanoidRootPart"))
 	elseif actionType == "ForwardDashAttack" then
-		CombatVFX.playForwardDashAttack(char, element)
-		SoundBank:playOnPart("DashAttackHit", char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
-
-	elseif actionType == "Ability" then
-		local slot = data and data.Slot or "Q"
-		CombatVFX.playAbility(char, ninjaKey, slot)
-		local soundName = SoundBank:getAbilitySound(ninjaKey, slot)
-		if soundName then
-			SoundBank:playOnPart(soundName, char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
-		end
-
-	elseif actionType == "Dash" then
-		local direction = data and data.Direction or nil
-		local dashType = data and data.DashType or "forward"
-		CombatVFX.playDash(char, direction, element, dashType)
-		SoundBank:playOnPart("DashWhoosh", char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
-
+		CombatVFX.playForwardDashAttack(char, color)
+		SoundBank:playOnPart("DashAttackHit", char:FindFirstChild("HumanoidRootPart"))
+	elseif actionType == "Move" then
+		local slot = data and data.Slot or "E"
+		CombatVFX.playAbility(char, charKey, slot)
+	elseif actionType == "Evasive" or actionType == "Dash" then
+		local direction = data and data.Direction
+		local dashType = data and data.DashType or "side"
+		CombatVFX.playDash(char, direction, color, dashType)
+		SoundBank:playOnPart("DashWhoosh", char:FindFirstChild("HumanoidRootPart"))
 	elseif actionType == "BlockStart" then
-		CombatVFX.createBlockShield(char, element)
-		SoundBank:playOnPart("BlockStart", char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
-
+		CombatVFX.createBlockShield(char, color)
 	elseif actionType == "BlockEnd" then
 		CombatVFX.removeBlockShield(char)
 	end
 end)
 
 --------------------------------------------------------------------------------
--- MATCH STATE
+-- GAME STATE
 --------------------------------------------------------------------------------
 
-Remotes.Match.MatchFound.OnClientEvent:Connect(function(opponentName, opponentNinja, myNinja)
-	isInMatch = true
+Remotes.Game.CharacterConfirmed.OnClientEvent:Connect(function(characterKey)
+	myCharacterKey = characterKey
+	myCharData = CharacterData.GetCharacter(characterKey) or CharacterData.StrongestHero
+	isInArena = true
 	isRagdolled = false
 	localComboIndex = 0
 	lastLocalM1Time = 0
+end)
+
+Remotes.Game.Respawned.OnClientEvent:Connect(function()
+	isRagdolled = false
+	isBlocking = false
+	localComboIndex = 0
+	evasiveCooldownEnd = 0
 	forwardBackCooldownEnd = 0
 	sideCooldownEnd = 0
-
-	if myNinja then
-		myNinjaKey = myNinja
-		local ninja = NinjaData.GetNinja(myNinja)
-		if ninja then
-			myElement = ninja.Element
-		end
-	end
 end)
 
-Remotes.Match.RoundStart.OnClientEvent:Connect(function(roundNum, countdown)
-	isRagdolled = false
-	if countdown <= 0 then
-		SoundBank:play("RoundStart")
-	end
-end)
-
-Remotes.Match.RoundEnd.OnClientEvent:Connect(function(winnerName, score1, score2)
-	local char = getMyCharacter()
-	if char then
-		CombatVFX.removeBlockShield(char)
-	end
-	isBlocking = false
-	isRagdolled = false
-end)
-
-Remotes.Match.MatchEnd.OnClientEvent:Connect(function(winnerName, scores)
-	isInMatch = false
-	isBlocking = false
-	isRagdolled = false
-	localComboIndex = 0
-
-	local char = getMyCharacter()
-	if char then
-		CombatVFX.removeBlockShield(char)
-	end
-
-	if winnerName == player.Name then
-		SoundBank:play("MatchWin")
-	else
-		SoundBank:play("KO")
-	end
-end)
-
-print("[CombatController] Loaded — TSB-style input (Q-dash, perfect block, uppercut/downslam)")
+print("[CombatController] Loaded - TSB controls (F block, Q evasive, E/R/T moves, G awakening)")

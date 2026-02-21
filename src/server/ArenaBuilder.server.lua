@@ -1,1121 +1,531 @@
 --[[
 	ArenaBuilder (Server)
-	Generates the game world programmatically: lobby plaza + two arenas.
-
-	Layout:
-	  - Lobby: city plaza at origin (0, 0, 0)
-	  - City Arena: open city block at (200, 0, 0)
-	  - Shadow Realm: dark underworld arena at (400, 0, 0)
-
-	MatchManager randomly picks an arena each match.
+	Generates the entire TSB-style world:
+	  - Lobby area with character selection pedestals
+	  - Open city arena for free-for-all combat
+	  - Destroyed urban aesthetic with rubble and props
 ]]
 
-local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
---------------------------------------------------------------------------------
--- ENVIRONMENT SETUP (Lighting, Sky, Atmosphere)
---------------------------------------------------------------------------------
-
-local function setupEnvironment()
-	Workspace.Terrain:Clear()
-
-	for _, child in ipairs(Lighting:GetChildren()) do
-		child:Destroy()
-	end
-
-	-- Bright daytime lighting — clean, high visibility for fighting
-	Lighting.Ambient = Color3.fromRGB(140, 140, 150)
-	Lighting.OutdoorAmbient = Color3.fromRGB(130, 130, 140)
-	Lighting.Brightness = 2.5
-	Lighting.ClockTime = 14.5          -- early afternoon sun
-	Lighting.GeographicLatitude = 30
-	Lighting.FogEnd = 8000
-	Lighting.FogStart = 2000
-	Lighting.FogColor = Color3.fromRGB(200, 210, 220)
-	Lighting.GlobalShadows = true
-	Lighting.EnvironmentDiffuseScale = 1
-	Lighting.EnvironmentSpecularScale = 0.8
-
-	-- Clear sky atmosphere
-	local atmo = Instance.new("Atmosphere")
-	atmo.Density = 0.2
-	atmo.Offset = 0.25
-	atmo.Color = Color3.fromRGB(200, 210, 225)
-	atmo.Decay = Color3.fromRGB(160, 170, 190)
-	atmo.Glare = 0
-	atmo.Haze = 0.5
-	atmo.Parent = Lighting
-
-	local sky = Instance.new("Sky")
-	sky.StarCount = 0
-	sky.CelestialBodiesShown = true
-	sky.SunAngularSize = 18
-	sky.Parent = Lighting
-
-	-- Subtle bloom for neon accents
-	local bloom = Instance.new("BloomEffect")
-	bloom.Intensity = 0.25
-	bloom.Size = 20
-	bloom.Threshold = 2.5
-	bloom.Parent = Lighting
-
-	-- Color correction — slightly desaturated urban feel
-	local cc = Instance.new("ColorCorrectionEffect")
-	cc.Brightness = 0.02
-	cc.Contrast = 0.08
-	cc.Saturation = -0.05
-	cc.TintColor = Color3.fromRGB(248, 248, 255)
-	cc.Parent = Lighting
-
-	-- Sun rays for atmosphere
-	local rays = Instance.new("SunRaysEffect")
-	rays.Intensity = 0.05
-	rays.Spread = 0.8
-	rays.Parent = Lighting
-end
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local CharacterData = require(Shared:WaitForChild("CharacterData"))
 
 --------------------------------------------------------------------------------
 -- HELPERS
 --------------------------------------------------------------------------------
 
-local function createPart(properties)
+local function createPart(props)
 	local part = Instance.new("Part")
+	part.Name = props.Name or "Part"
+	part.Size = props.Size or Vector3.new(4, 1, 4)
+	part.Position = props.Position or Vector3.new(0, 0, 0)
 	part.Anchored = true
+	part.Material = props.Material or Enum.Material.Concrete
+	part.Color = props.Color or Color3.fromRGB(180, 180, 180)
 	part.TopSurface = Enum.SurfaceType.Smooth
 	part.BottomSurface = Enum.SurfaceType.Smooth
-	part.CastShadow = true
-
-	for key, value in pairs(properties) do
-		part[key] = value
-	end
-
+	if props.Transparency then part.Transparency = props.Transparency end
+	if props.CanCollide ~= nil then part.CanCollide = props.CanCollide end
+	if props.CFrame then part.CFrame = props.CFrame end
+	part.Parent = props.Parent or workspace
 	return part
 end
 
-local function createInvisibleWall(parent, position, size)
+local function createInvisibleWall(name, pos, size, parent)
 	local wall = Instance.new("Part")
-	wall.Name = "Barrier"
+	wall.Name = name
+	wall.Size = size
+	wall.Position = pos
 	wall.Anchored = true
 	wall.Transparency = 1
 	wall.CanCollide = true
-	wall.Size = size
-	wall.Position = position
-	wall.Parent = parent
+	wall.Parent = parent or workspace
 	return wall
 end
 
--- Adds a simple window grid (SurfaceGui) to a building face
-local function addWindows(building, face, rows, cols, windowColor)
+local function addWindows(building, face, rows, cols)
 	local gui = Instance.new("SurfaceGui")
 	gui.Face = face
 	gui.Parent = building
 
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1, 0, 1, 0)
-	frame.BackgroundTransparency = 1
-	frame.Parent = gui
+	local grid = Instance.new("Frame")
+	grid.Size = UDim2.new(1, 0, 1, 0)
+	grid.BackgroundTransparency = 1
+	grid.Parent = gui
 
-	-- Padding
-	local padding = Instance.new("UIPadding")
-	padding.PaddingTop = UDim.new(0.05, 0)
-	padding.PaddingBottom = UDim.new(0.05, 0)
-	padding.PaddingLeft = UDim.new(0.05, 0)
-	padding.PaddingRight = UDim.new(0.05, 0)
-	padding.Parent = frame
+	local layout = Instance.new("UIGridLayout")
+	layout.CellSize = UDim2.new(1 / cols, -4, 1 / rows, -4)
+	layout.CellPadding = UDim2.new(0, 3, 0, 3)
+	layout.Parent = grid
 
-	local grid = Instance.new("UIGridLayout")
-	grid.CellSize = UDim2.new(1 / cols - 0.02, 0, 1 / rows - 0.02, 0)
-	grid.CellPadding = UDim2.new(0.01, 0, 0.01, 0)
-	grid.FillDirection = Enum.FillDirection.Horizontal
-	grid.SortOrder = Enum.SortOrder.LayoutOrder
-	grid.Parent = frame
-
-	local wColor = windowColor or Color3.fromRGB(160, 200, 220)
 	for i = 1, rows * cols do
 		local window = Instance.new("Frame")
-		window.BackgroundColor3 = wColor
-		window.BackgroundTransparency = 0.15
+		window.BackgroundColor3 = Color3.fromRGB(
+			140 + math.random(-20, 30),
+			160 + math.random(-20, 30),
+			190 + math.random(-20, 30)
+		)
+		window.BackgroundTransparency = math.random() * 0.3 + 0.1
 		window.BorderSizePixel = 0
-		window.LayoutOrder = i
-		window.Parent = frame
+		window.Parent = grid
 	end
 end
 
--- Build a city building with optional windows
-local function createBuilding(parent, pos, size, color, windowRows, windowCols, windowFaces)
+local function createBuilding(name, pos, size, color, parent)
 	local building = createPart({
-		Name = "Building",
+		Name = name,
 		Size = size,
-		Position = pos,
-		Color = color or Color3.fromRGB(160, 160, 165),
+		Position = pos + Vector3.new(0, size.Y / 2, 0),
 		Material = Enum.Material.Concrete,
+		Color = color or Color3.fromRGB(130 + math.random(-15, 15), 130 + math.random(-15, 15), 135 + math.random(-15, 15)),
+		Parent = parent,
 	})
-	building.Parent = parent
 
-	-- Roof accent
-	local roofHeight = 1
-	local roof = createPart({
-		Name = "Roof",
-		Size = Vector3.new(size.X + 0.5, roofHeight, size.Z + 0.5),
-		Position = pos + Vector3.new(0, size.Y / 2 + roofHeight / 2, 0),
-		Color = Color3.fromRGB(
-			math.max(0, color.R * 255 - 20) / 255,
-			math.max(0, color.G * 255 - 20) / 255,
-			math.max(0, color.B * 255 - 20) / 255
-		),
-		Material = Enum.Material.Concrete,
+	createPart({
+		Name = name .. "_Roof",
+		Size = Vector3.new(size.X + 1, 0.5, size.Z + 1),
+		Position = pos + Vector3.new(0, size.Y + 0.25, 0),
+		Material = Enum.Material.SmoothPlastic,
+		Color = Color3.fromRGB(80, 80, 85),
+		Parent = parent,
 	})
-	roof.Parent = parent
 
-	-- Windows
-	if windowRows and windowCols then
-		local faces = windowFaces or { Enum.NormalId.Front, Enum.NormalId.Back, Enum.NormalId.Left, Enum.NormalId.Right }
-		local wColors = {
-			Color3.fromRGB(140, 190, 220), -- blue-tinted glass
-			Color3.fromRGB(180, 210, 200), -- green-tinted glass
-			Color3.fromRGB(170, 170, 190), -- gray glass
-		}
-		local wColor = wColors[math.random(1, #wColors)]
-		for _, face in ipairs(faces) do
-			addWindows(building, face, windowRows, windowCols, wColor)
-		end
+	local rows = math.floor(size.Y / 5)
+	local cols = math.floor(size.X / 5)
+	if rows > 0 and cols > 0 then
+		addWindows(building, Enum.NormalId.Front, rows, cols)
+		addWindows(building, Enum.NormalId.Back, rows, cols)
+	end
+	local sideCols = math.floor(size.Z / 5)
+	if rows > 0 and sideCols > 0 then
+		addWindows(building, Enum.NormalId.Left, rows, sideCols)
+		addWindows(building, Enum.NormalId.Right, rows, sideCols)
 	end
 
 	return building
 end
 
--- Create a street lamp
-local function createStreetLamp(parent, position)
-	-- Pole
-	local pole = createPart({
-		Name = "LampPole",
-		Size = Vector3.new(0.5, 12, 0.5),
-		Position = position + Vector3.new(0, 6, 0),
-		Color = Color3.fromRGB(60, 60, 65),
-		Material = Enum.Material.Metal,
+local function createStreetLamp(pos, parent)
+	createPart({
+		Name = "LampPole", Size = Vector3.new(0.4, 12, 0.4),
+		Position = pos + Vector3.new(0, 6, 0),
+		Material = Enum.Material.Metal, Color = Color3.fromRGB(60, 60, 65), Parent = parent,
 	})
-	pole.Parent = parent
-
-	-- Arm
-	local arm = createPart({
-		Name = "LampArm",
-		Size = Vector3.new(3, 0.3, 0.3),
-		Position = position + Vector3.new(1.5, 12, 0),
-		Color = Color3.fromRGB(60, 60, 65),
-		Material = Enum.Material.Metal,
+	createPart({
+		Name = "LampArm", Size = Vector3.new(0.3, 0.3, 3),
+		Position = pos + Vector3.new(0, 12, 1.5),
+		Material = Enum.Material.Metal, Color = Color3.fromRGB(60, 60, 65), Parent = parent,
 	})
-	arm.Parent = parent
-
-	-- Light housing
 	local housing = createPart({
-		Name = "LampHousing",
-		Size = Vector3.new(1.5, 0.5, 1.5),
-		Position = position + Vector3.new(3, 11.5, 0),
-		Color = Color3.fromRGB(80, 80, 85),
-		Material = Enum.Material.Metal,
+		Name = "LampHousing", Size = Vector3.new(1.2, 0.5, 1.2),
+		Position = pos + Vector3.new(0, 11.8, 3),
+		Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(50, 50, 55), Parent = parent,
 	})
-	housing.Parent = parent
-
-	-- Light
 	local light = Instance.new("PointLight")
 	light.Color = Color3.fromRGB(255, 240, 210)
-	light.Brightness = 1
+	light.Brightness = 1.2
 	light.Range = 25
 	light.Parent = housing
 end
 
--- Create a concrete barrier
-local function createBarrier(parent, position, rotation)
-	local barrier = createPart({
-		Name = "ConcreteBarrier",
-		Size = Vector3.new(4, 2.5, 1.5),
-		CFrame = CFrame.new(position) * CFrame.Angles(0, math.rad(rotation or 0), 0),
-		Color = Color3.fromRGB(170, 170, 170),
-		Material = Enum.Material.Concrete,
-	})
-	barrier.Parent = parent
-
-	-- Yellow warning stripe
-	local stripe = createPart({
-		Name = "BarrierStripe",
-		Size = Vector3.new(4.05, 0.3, 0.1),
-		CFrame = barrier.CFrame * CFrame.new(0, 0.5, 0.75),
-		Color = Color3.fromRGB(255, 200, 0),
-		Material = Enum.Material.SmoothPlastic,
-	})
-	stripe.Parent = parent
-end
-
--- Create a dumpster
-local function createDumpster(parent, position, rotation)
-	local body = createPart({
-		Name = "Dumpster",
-		Size = Vector3.new(4, 3, 2.5),
-		CFrame = CFrame.new(position + Vector3.new(0, 1.5, 0)) * CFrame.Angles(0, math.rad(rotation or 0), 0),
-		Color = Color3.fromRGB(40, 90, 40),
-		Material = Enum.Material.Metal,
-	})
-	body.Parent = parent
-
-	-- Lid
-	local lid = createPart({
-		Name = "DumpsterLid",
-		Size = Vector3.new(4.2, 0.2, 2.7),
-		CFrame = body.CFrame * CFrame.new(0, 1.6, 0),
-		Color = Color3.fromRGB(35, 80, 35),
-		Material = Enum.Material.Metal,
-	})
-	lid.Parent = parent
-end
-
--- Create road markings
-local function createRoadLine(parent, position, size, dashed)
-	if dashed then
-		local numDashes = math.floor(size.Z / 4)
-		for i = 0, numDashes - 1 do
-			local dash = createPart({
-				Name = "RoadDash",
-				Size = Vector3.new(size.X, 0.05, 2),
-				Position = position + Vector3.new(0, 0, -size.Z / 2 + i * 4 + 1),
-				Color = Color3.fromRGB(255, 255, 255),
-				Material = Enum.Material.SmoothPlastic,
-			})
-			dash.Parent = parent
-		end
-	else
-		local line = createPart({
-			Name = "RoadLine",
-			Size = Vector3.new(size.X, 0.05, size.Z),
-			Position = position,
-			Color = Color3.fromRGB(255, 255, 255),
-			Material = Enum.Material.SmoothPlastic,
+local function createRubble(pos, parent)
+	for i = 1, math.random(3, 6) do
+		local s = math.random() * 1.5 + 0.3
+		createPart({
+			Name = "Rubble", Size = Vector3.new(s, s * 0.6, s),
+			Position = pos + Vector3.new((math.random() - 0.5) * 5, s * 0.3, (math.random() - 0.5) * 5),
+			Material = Enum.Material.Slate,
+			Color = Color3.fromRGB(100 + math.random(-15, 15), 95 + math.random(-15, 15), 90 + math.random(-15, 15)),
+			Parent = parent,
 		})
-		line.Parent = parent
 	end
 end
 
--- Create a parked car (simple blocky shape)
-local function createCar(parent, position, rotation, bodyColor)
-	local cf = CFrame.new(position) * CFrame.Angles(0, math.rad(rotation or 0), 0)
-
-	-- Car body
+local function createCar(pos, color, rotation, parent)
 	local body = createPart({
-		Name = "CarBody",
-		Size = Vector3.new(5.5, 2, 10),
-		CFrame = cf * CFrame.new(0, 1.5, 0),
-		Color = bodyColor or Color3.fromRGB(180, 40, 40),
-		Material = Enum.Material.SmoothPlastic,
+		Name = "CarBody", Size = Vector3.new(5, 2, 10),
+		CFrame = CFrame.new(pos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, math.rad(rotation or 0), 0),
+		Material = Enum.Material.SmoothPlastic, Color = color, Parent = parent,
 	})
-	body.Parent = parent
-
-	-- Cabin/roof
-	local cabin = createPart({
-		Name = "CarCabin",
-		Size = Vector3.new(5, 1.8, 5),
-		CFrame = cf * CFrame.new(0, 3.2, -0.5),
-		Color = bodyColor or Color3.fromRGB(180, 40, 40),
-		Material = Enum.Material.SmoothPlastic,
+	createPart({
+		Name = "CarCabin", Size = Vector3.new(4.5, 1.5, 5),
+		CFrame = body.CFrame * CFrame.new(0, 1.5, -0.5),
+		Material = Enum.Material.SmoothPlastic, Color = color, Parent = parent,
 	})
-	cabin.Parent = parent
-
-	-- Windshield
-	local windshield = createPart({
-		Name = "Windshield",
-		Size = Vector3.new(4.5, 1.5, 0.2),
-		CFrame = cf * CFrame.new(0, 3, -3) * CFrame.Angles(math.rad(15), 0, 0),
-		Color = Color3.fromRGB(150, 200, 230),
-		Material = Enum.Material.Glass,
-		Transparency = 0.4,
+	createPart({
+		Name = "Windshield", Size = Vector3.new(4.2, 1.3, 0.2),
+		CFrame = body.CFrame * CFrame.new(0, 1.2, -3) * CFrame.Angles(math.rad(15), 0, 0),
+		Material = Enum.Material.Glass, Color = Color3.fromRGB(180, 210, 240),
+		Transparency = 0.4, Parent = parent,
 	})
-	windshield.Parent = parent
-
-	-- Wheels (4 cylinders)
-	local wheelPositions = {
-		cf * CFrame.new(-2.5, 0.6, -3),
-		cf * CFrame.new(2.5, 0.6, -3),
-		cf * CFrame.new(-2.5, 0.6, 3),
-		cf * CFrame.new(2.5, 0.6, 3),
-	}
-	for _, wCF in ipairs(wheelPositions) do
-		local wheel = createPart({
-			Name = "Wheel",
-			Shape = Enum.PartType.Cylinder,
-			Size = Vector3.new(1.2, 1, 1.2),
-			CFrame = wCF * CFrame.Angles(0, 0, math.rad(90)),
-			Color = Color3.fromRGB(30, 30, 30),
-			Material = Enum.Material.SmoothPlastic,
+	for _, offset in ipairs({
+		Vector3.new(-2.2, -0.3, -3.5), Vector3.new(2.2, -0.3, -3.5),
+		Vector3.new(-2.2, -0.3, 3.5), Vector3.new(2.2, -0.3, 3.5),
+	}) do
+		createPart({
+			Name = "Wheel", Size = Vector3.new(0.6, 1.4, 1.4),
+			CFrame = body.CFrame * CFrame.new(offset),
+			Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(30, 30, 35), Parent = parent,
 		})
-		wheel.Parent = parent
+	end
+end
+
+local function createBarrier(pos, rotation, parent)
+	local barrier = createPart({
+		Name = "Barrier", Size = Vector3.new(4, 2.5, 1.5),
+		CFrame = CFrame.new(pos + Vector3.new(0, 1.25, 0)) * CFrame.Angles(0, math.rad(rotation or 0), 0),
+		Material = Enum.Material.Concrete, Color = Color3.fromRGB(160, 160, 155), Parent = parent,
+	})
+	createPart({
+		Name = "BarrierStripe", Size = Vector3.new(4.05, 0.4, 1.55),
+		CFrame = barrier.CFrame * CFrame.new(0, 0.5, 0),
+		Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(220, 180, 40), Parent = parent,
+	})
+end
+
+local function createRoadLine(startPos, endPos, isDashed, parent)
+	local dir = (endPos - startPos)
+	local length = dir.Magnitude
+	local unit = dir.Unit
+	if isDashed then
+		local dashLen, gapLen, pos = 3, 2, 0
+		while pos < length do
+			local segEnd = math.min(pos + dashLen, length)
+			local segCenter = startPos + unit * ((pos + segEnd) / 2) + Vector3.new(0, 0.02, 0)
+			createPart({
+				Name = "RoadDash", Size = Vector3.new(0.3, 0.05, segEnd - pos),
+				CFrame = CFrame.lookAt(segCenter, segCenter + unit),
+				Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(230, 220, 60), Parent = parent,
+			})
+			pos = segEnd + gapLen
+		end
+	else
+		local center = (startPos + endPos) / 2 + Vector3.new(0, 0.02, 0)
+		createPart({
+			Name = "RoadLine", Size = Vector3.new(0.3, 0.05, length),
+			CFrame = CFrame.lookAt(center, center + unit),
+			Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(230, 220, 60), Parent = parent,
+		})
 	end
 end
 
 --------------------------------------------------------------------------------
--- BUILD LOBBY (city plaza)
+-- LIGHTING
+--------------------------------------------------------------------------------
+
+local function setupLighting()
+	workspace.Terrain:Clear()
+
+	Lighting.ClockTime = 14.5
+	Lighting.Brightness = 2.5
+	Lighting.Ambient = Color3.fromRGB(70, 70, 80)
+	Lighting.OutdoorAmbient = Color3.fromRGB(100, 100, 110)
+	Lighting.FogEnd = 2000
+	Lighting.GlobalShadows = true
+
+	local sky = Lighting:FindFirstChildOfClass("Sky") or Instance.new("Sky")
+	sky.SunAngularSize = 15
+	sky.MoonAngularSize = 10
+	sky.Parent = Lighting
+
+	local atmo = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
+	atmo.Density = 0.3
+	atmo.Offset = 0.2
+	atmo.Color = Color3.fromRGB(200, 210, 225)
+	atmo.Decay = Color3.fromRGB(120, 130, 150)
+	atmo.Glare = 0.1
+	atmo.Haze = 1.5
+	atmo.Parent = Lighting
+
+	local bloom = Lighting:FindFirstChildOfClass("BloomEffect") or Instance.new("BloomEffect")
+	bloom.Intensity = 0.25
+	bloom.Size = 18
+	bloom.Threshold = 1.5
+	bloom.Parent = Lighting
+
+	local cc = Lighting:FindFirstChildOfClass("ColorCorrectionEffect") or Instance.new("ColorCorrectionEffect")
+	cc.Saturation = -0.1
+	cc.Contrast = 0.05
+	cc.Brightness = 0.02
+	cc.Parent = Lighting
+
+	local rays = Lighting:FindFirstChildOfClass("SunRaysEffect") or Instance.new("SunRaysEffect")
+	rays.Intensity = 0.04
+	rays.Spread = 0.6
+	rays.Parent = Lighting
+end
+
+--------------------------------------------------------------------------------
+-- LOBBY
 --------------------------------------------------------------------------------
 
 local function buildLobby()
-	local folder = Instance.new("Folder")
-	folder.Name = "Lobby"
-	folder.Parent = Workspace
+	local lobbyFolder = Instance.new("Folder")
+	lobbyFolder.Name = "Lobby"
+	lobbyFolder.Parent = workspace
 
-	-- Ground: large concrete plaza
-	local ground = createPart({
-		Name = "LobbyGround",
-		Size = Vector3.new(120, 2, 120),
-		Position = Vector3.new(0, -1, 0),
-		Color = Color3.fromRGB(165, 165, 160),
-		Material = Enum.Material.Concrete,
+	-- Ground
+	createPart({
+		Name = "LobbyGround", Size = Vector3.new(100, 1, 100),
+		Position = Vector3.new(0, -0.5, 0),
+		Material = Enum.Material.Concrete, Color = Color3.fromRGB(170, 165, 160), Parent = lobbyFolder,
 	})
-	ground.Parent = folder
 
-	-- Sidewalk border (slightly raised)
-	local sidewalkData = {
-		{ pos = Vector3.new(0, 0.2, -55), size = Vector3.new(120, 0.4, 10) },
-		{ pos = Vector3.new(0, 0.2, 55), size = Vector3.new(120, 0.4, 10) },
-		{ pos = Vector3.new(-55, 0.2, 0), size = Vector3.new(10, 0.4, 100) },
-		{ pos = Vector3.new(55, 0.2, 0), size = Vector3.new(10, 0.4, 100) },
-	}
-	for i, sw in ipairs(sidewalkData) do
-		local sidewalk = createPart({
-			Name = "Sidewalk_" .. i,
-			Size = sw.size,
-			Position = sw.pos,
-			Color = Color3.fromRGB(180, 180, 175),
-			Material = Enum.Material.Concrete,
-		})
-		sidewalk.Parent = folder
-	end
-
-	-- Lobby spawn (default spawn for joining players)
-	local lobbySpawn = Instance.new("SpawnLocation")
-	lobbySpawn.Name = "LobbySpawn"
-	lobbySpawn.Anchored = true
-	lobbySpawn.Size = Vector3.new(8, 0.2, 8)
-	lobbySpawn.Position = Vector3.new(0, 0.1, 0)
-	lobbySpawn.TopSurface = Enum.SurfaceType.Smooth
-	lobbySpawn.CanCollide = true
-	lobbySpawn.Enabled = true
-	lobbySpawn.Transparency = 1
-	lobbySpawn.Parent = folder
-
-	-- Title sign on a building wall
-	local signWall = createPart({
-		Name = "SignWall",
-		Size = Vector3.new(30, 10, 1),
-		Position = Vector3.new(0, 15, -49),
-		Color = Color3.fromRGB(50, 50, 55),
-		Material = Enum.Material.SmoothPlastic,
+	-- Title wall
+	local titleWall = createPart({
+		Name = "TitleWall", Size = Vector3.new(40, 12, 2),
+		Position = Vector3.new(0, 6, -45),
+		Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(40, 40, 45), Parent = lobbyFolder,
 	})
-	signWall.Parent = folder
 
-	local signGui = Instance.new("SurfaceGui")
-	signGui.Face = Enum.NormalId.Front
-	signGui.Parent = signWall
+	local titleGui = Instance.new("SurfaceGui")
+	titleGui.Face = Enum.NormalId.Front
+	titleGui.Parent = titleWall
 
-	local signText = Instance.new("TextLabel")
-	signText.Size = UDim2.new(1, 0, 0.5, 0)
-	signText.Position = UDim2.new(0, 0, 0.1, 0)
-	signText.BackgroundTransparency = 1
-	signText.Text = "ELEMENTAL NINJA DUELS"
-	signText.TextColor3 = Color3.fromRGB(255, 215, 0)
-	signText.TextScaled = true
-	signText.Font = Enum.Font.GothamBold
-	signText.Parent = signGui
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Size = UDim2.new(1, 0, 0.6, 0)
+	titleLabel.Position = UDim2.new(0, 0, 0.1, 0)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Text = "THE STRONGEST\nBATTLEGROUNDS"
+	titleLabel.TextColor3 = Color3.fromRGB(255, 80, 30)
+	titleLabel.TextStrokeTransparency = 0
+	titleLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	titleLabel.TextScaled = true
+	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.Parent = titleGui
 
-	local subText = Instance.new("TextLabel")
-	subText.Size = UDim2.new(1, 0, 0.25, 0)
-	subText.Position = UDim2.new(0, 0, 0.6, 0)
-	subText.BackgroundTransparency = 1
-	subText.Text = "SELECT YOUR NINJA & FIGHT"
-	subText.TextColor3 = Color3.fromRGB(200, 200, 210)
-	subText.TextScaled = true
-	subText.Font = Enum.Font.Gotham
-	subText.Parent = signGui
+	local subtitleLabel = Instance.new("TextLabel")
+	subtitleLabel.Size = UDim2.new(1, 0, 0.25, 0)
+	subtitleLabel.Position = UDim2.new(0, 0, 0.7, 0)
+	subtitleLabel.BackgroundTransparency = 1
+	subtitleLabel.Text = "SELECT YOUR FIGHTER"
+	subtitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	subtitleLabel.TextStrokeTransparency = 0.5
+	subtitleLabel.TextScaled = true
+	subtitleLabel.Font = Enum.Font.Gotham
+	subtitleLabel.Parent = titleGui
 
-	-- Lobby buildings (surrounding the plaza)
-	local lobbyBuildings = {
-		-- Back row (behind sign)
-		{ pos = Vector3.new(-30, 20, -58), size = Vector3.new(22, 40, 16), color = Color3.fromRGB(150, 145, 140), rows = 8, cols = 4 },
-		{ pos = Vector3.new(30, 15, -58), size = Vector3.new(26, 30, 16), color = Color3.fromRGB(140, 140, 150), rows = 6, cols = 5 },
-		-- Left side
-		{ pos = Vector3.new(-58, 17, -15), size = Vector3.new(16, 34, 22), color = Color3.fromRGB(155, 150, 145), rows = 7, cols = 4 },
-		{ pos = Vector3.new(-58, 12, 20), size = Vector3.new(16, 24, 20), color = Color3.fromRGB(160, 155, 155), rows = 5, cols = 4 },
-		-- Right side
-		{ pos = Vector3.new(58, 22, -10), size = Vector3.new(16, 44, 25), color = Color3.fromRGB(145, 145, 150), rows = 9, cols = 5 },
-		{ pos = Vector3.new(58, 10, 25), size = Vector3.new(16, 20, 18), color = Color3.fromRGB(165, 160, 155), rows = 4, cols = 3 },
-		-- Front side
-		{ pos = Vector3.new(-25, 14, 58), size = Vector3.new(20, 28, 16), color = Color3.fromRGB(150, 150, 155), rows = 6, cols = 4 },
-		{ pos = Vector3.new(25, 18, 58), size = Vector3.new(24, 36, 16), color = Color3.fromRGB(155, 152, 148), rows = 7, cols = 5 },
-	}
+	-- Character selection pedestals
+	local characters = CharacterData.GetAllCharacterNames()
+	local spacing = 12
+	local startX = -(#characters - 1) * spacing / 2
 
-	for _, bData in ipairs(lobbyBuildings) do
-		createBuilding(folder, bData.pos, bData.size, bData.color, bData.rows, bData.cols)
-	end
+	for i, charKey in ipairs(characters) do
+		local charInfo = CharacterData.GetCharacter(charKey)
+		local xPos = startX + (i - 1) * spacing
 
-	-- Element pillars (decorative, one per ninja element)
-	local pillarData = {
-		{ pos = Vector3.new(-12, 4, -12), color = Color3.fromRGB(255, 80, 20), label = "FIRE" },
-		{ pos = Vector3.new(12, 4, -12), color = Color3.fromRGB(30, 144, 255), label = "WATER" },
-		{ pos = Vector3.new(-12, 4, 12), color = Color3.fromRGB(255, 230, 50), label = "LIGHTNING" },
-		{ pos = Vector3.new(12, 4, 12), color = Color3.fromRGB(100, 50, 160), label = "SHADOW" },
-	}
-
-	for _, pData in ipairs(pillarData) do
-		local pillar = createPart({
-			Name = "ElementPillar",
-			Size = Vector3.new(3, 8, 3),
-			Position = pData.pos,
-			Color = pData.color,
-			Material = Enum.Material.Neon,
-		})
-		pillar.Parent = folder
-
-		local pillarLight = Instance.new("PointLight")
-		pillarLight.Color = pData.color
-		pillarLight.Brightness = 2
-		pillarLight.Range = 15
-		pillarLight.Parent = pillar
-	end
-
-	-- Street lamps in lobby
-	createStreetLamp(folder, Vector3.new(-25, 0, -25))
-	createStreetLamp(folder, Vector3.new(25, 0, -25))
-	createStreetLamp(folder, Vector3.new(-25, 0, 25))
-	createStreetLamp(folder, Vector3.new(25, 0, 25))
-
-	return folder
-end
-
---------------------------------------------------------------------------------
--- BUILD ARENA (city battleground)
---------------------------------------------------------------------------------
-
-local function buildArena()
-	local folder = Instance.new("Folder")
-	folder.Name = "Arena"
-	folder.Parent = Workspace
-
-	local CX, CZ = 200, 0  -- arena center
-
-	-- Ground: damaged asphalt / concrete
-	local ground = createPart({
-		Name = "ArenaGround",
-		Size = Vector3.new(140, 2, 140),
-		Position = Vector3.new(CX, -1, CZ),
-		Color = Color3.fromRGB(130, 130, 125),
-		Material = Enum.Material.Concrete,
-	})
-	ground.Parent = folder
-
-	-- Road running through the arena (X-axis)
-	local road = createPart({
-		Name = "Road",
-		Size = Vector3.new(140, 0.05, 22),
-		Position = Vector3.new(CX, 0.05, CZ),
-		Color = Color3.fromRGB(60, 60, 60),
-		Material = Enum.Material.Asphalt,
-	})
-	road.Parent = folder
-
-	-- Road markings
-	createRoadLine(folder, Vector3.new(CX, 0.1, CZ), Vector3.new(0.3, 0.05, 140), true) -- center dashed
-	createRoadLine(folder, Vector3.new(CX, 0.1, CZ - 10), Vector3.new(0.4, 0.05, 140), false) -- edge solid
-	createRoadLine(folder, Vector3.new(CX, 0.1, CZ + 10), Vector3.new(0.4, 0.05, 140), false) -- edge solid
-
-	-- Cross road (Z-axis)
-	local crossRoad = createPart({
-		Name = "CrossRoad",
-		Size = Vector3.new(22, 0.05, 140),
-		Position = Vector3.new(CX, 0.05, CZ),
-		Color = Color3.fromRGB(60, 60, 60),
-		Material = Enum.Material.Asphalt,
-	})
-	crossRoad.Parent = folder
-
-	-- Sidewalks around the intersection
-	local sidewalks = {
-		{ pos = Vector3.new(CX - 40, 0.3, CZ - 40), size = Vector3.new(50, 0.6, 50) },
-		{ pos = Vector3.new(CX + 40, 0.3, CZ - 40), size = Vector3.new(50, 0.6, 50) },
-		{ pos = Vector3.new(CX - 40, 0.3, CZ + 40), size = Vector3.new(50, 0.6, 50) },
-		{ pos = Vector3.new(CX + 40, 0.3, CZ + 40), size = Vector3.new(50, 0.6, 50) },
-	}
-	for i, sw in ipairs(sidewalks) do
-		local sidewalk = createPart({
-			Name = "Sidewalk_" .. i,
-			Size = sw.size,
-			Position = sw.pos,
-			Color = Color3.fromRGB(175, 175, 170),
-			Material = Enum.Material.Concrete,
-		})
-		sidewalk.Parent = folder
-	end
-
-	-- Arena buildings (surrounding the intersection on all 4 corners)
-	local arenaBuildings = {
-		-- Northeast corner (quadrant: +X, -Z)
-		{ pos = Vector3.new(CX + 42, 25, CZ - 42), size = Vector3.new(28, 50, 28), color = Color3.fromRGB(155, 150, 148), rows = 10, cols = 5 },
-		{ pos = Vector3.new(CX + 55, 15, CZ - 20), size = Vector3.new(18, 30, 16), color = Color3.fromRGB(145, 145, 150), rows = 6, cols = 3 },
-		{ pos = Vector3.new(CX + 25, 12, CZ - 55), size = Vector3.new(20, 24, 18), color = Color3.fromRGB(160, 158, 152), rows = 5, cols = 4 },
-
-		-- Northwest corner (quadrant: -X, -Z)
-		{ pos = Vector3.new(CX - 42, 20, CZ - 42), size = Vector3.new(26, 40, 26), color = Color3.fromRGB(150, 148, 145), rows = 8, cols = 5 },
-		{ pos = Vector3.new(CX - 55, 17, CZ - 22), size = Vector3.new(18, 34, 20), color = Color3.fromRGB(158, 155, 150), rows = 7, cols = 3 },
-		{ pos = Vector3.new(CX - 22, 10, CZ - 55), size = Vector3.new(16, 20, 16), color = Color3.fromRGB(162, 160, 155), rows = 4, cols = 3 },
-
-		-- Southeast corner (quadrant: +X, +Z)
-		{ pos = Vector3.new(CX + 42, 22, CZ + 42), size = Vector3.new(24, 44, 24), color = Color3.fromRGB(148, 148, 152), rows = 9, cols = 4 },
-		{ pos = Vector3.new(CX + 55, 13, CZ + 20), size = Vector3.new(18, 26, 18), color = Color3.fromRGB(155, 152, 148), rows = 5, cols = 3 },
-		{ pos = Vector3.new(CX + 20, 16, CZ + 55), size = Vector3.new(22, 32, 18), color = Color3.fromRGB(152, 150, 155), rows = 6, cols = 4 },
-
-		-- Southwest corner (quadrant: -X, +Z)
-		{ pos = Vector3.new(CX - 42, 18, CZ + 42), size = Vector3.new(22, 36, 22), color = Color3.fromRGB(158, 155, 152), rows = 7, cols = 4 },
-		{ pos = Vector3.new(CX - 55, 25, CZ + 22), size = Vector3.new(18, 50, 20), color = Color3.fromRGB(142, 142, 148), rows = 10, cols = 3 },
-		{ pos = Vector3.new(CX - 22, 11, CZ + 55), size = Vector3.new(18, 22, 16), color = Color3.fromRGB(165, 162, 158), rows = 4, cols = 3 },
-	}
-
-	for _, bData in ipairs(arenaBuildings) do
-		createBuilding(folder, bData.pos, bData.size, bData.color, bData.rows, bData.cols)
-	end
-
-	-- Street lamps around the intersection
-	local lampPositions = {
-		Vector3.new(CX - 13, 0, CZ - 13),
-		Vector3.new(CX + 13, 0, CZ - 13),
-		Vector3.new(CX - 13, 0, CZ + 13),
-		Vector3.new(CX + 13, 0, CZ + 13),
-	}
-	for _, pos in ipairs(lampPositions) do
-		createStreetLamp(folder, pos)
-	end
-
-	-- Props: concrete barriers, dumpsters, cars
-	createBarrier(folder, Vector3.new(CX - 15, 0, CZ - 14), 0)
-	createBarrier(folder, Vector3.new(CX + 16, 0, CZ + 14), 90)
-	createBarrier(folder, Vector3.new(CX + 14, 0, CZ - 16), 45)
-
-	createDumpster(folder, Vector3.new(CX - 28, 0, CZ - 16), 10)
-	createDumpster(folder, Vector3.new(CX + 30, 0, CZ + 18), -20)
-
-	-- Parked cars along the road edges
-	createCar(folder, Vector3.new(CX - 20, 0, CZ + 14), 0, Color3.fromRGB(40, 80, 160))
-	createCar(folder, Vector3.new(CX + 22, 0, CZ - 14), 180, Color3.fromRGB(180, 40, 40))
-	createCar(folder, Vector3.new(CX - 35, 0, CZ - 14), 0, Color3.fromRGB(220, 220, 220))
-
-	-- Rubble/debris piles (small clusters of parts for battle-worn feel)
-	local rubblePositions = {
-		Vector3.new(CX + 8, 0, CZ + 6),
-		Vector3.new(CX - 10, 0, CZ - 8),
-		Vector3.new(CX + 5, 0, CZ - 5),
-	}
-	for _, rPos in ipairs(rubblePositions) do
-		for i = 1, math.random(3, 5) do
-			local rubble = createPart({
-				Name = "Rubble",
-				Size = Vector3.new(
-					math.random() * 1.5 + 0.5,
-					math.random() * 0.8 + 0.3,
-					math.random() * 1.5 + 0.5
-				),
-				Position = rPos + Vector3.new(
-					(math.random() - 0.5) * 4,
-					math.random() * 0.5,
-					(math.random() - 0.5) * 4
-				),
-				Color = Color3.fromRGB(
-					140 + math.random(-15, 15),
-					140 + math.random(-15, 15),
-					135 + math.random(-15, 15)
-				),
-				Material = Enum.Material.Concrete,
-				Rotation = Vector3.new(
-					math.random() * 30,
-					math.random() * 360,
-					math.random() * 30
-				),
-			})
-			rubble.Parent = folder
-		end
-	end
-
-	-- Arena spawn points (invisible, used by MatchManager)
-	local spawnA = Instance.new("SpawnLocation")
-	spawnA.Name = "ArenaSpawnA"
-	spawnA.Anchored = true
-	spawnA.Size = Vector3.new(6, 0.2, 6)
-	spawnA.Position = Vector3.new(CX, 0.1, CZ - 20)
-	spawnA.TopSurface = Enum.SurfaceType.Smooth
-	spawnA.CanCollide = true
-	spawnA.Enabled = false
-	spawnA.Transparency = 1
-	spawnA.Parent = folder
-
-	local spawnB = Instance.new("SpawnLocation")
-	spawnB.Name = "ArenaSpawnB"
-	spawnB.Anchored = true
-	spawnB.Size = Vector3.new(6, 0.2, 6)
-	spawnB.Position = Vector3.new(CX, 0.1, CZ + 20)
-	spawnB.TopSurface = Enum.SurfaceType.Smooth
-	spawnB.CanCollide = true
-	spawnB.Enabled = false
-	spawnB.Transparency = 1
-	spawnB.Parent = folder
-
-	-- Invisible arena boundaries (keep fighters in the intersection area)
-	createInvisibleWall(folder, Vector3.new(CX, 20, CZ - 65), Vector3.new(140, 40, 2))
-	createInvisibleWall(folder, Vector3.new(CX, 20, CZ + 65), Vector3.new(140, 40, 2))
-	createInvisibleWall(folder, Vector3.new(CX - 65, 20, CZ), Vector3.new(2, 40, 140))
-	createInvisibleWall(folder, Vector3.new(CX + 65, 20, CZ), Vector3.new(2, 40, 140))
-	createInvisibleWall(folder, Vector3.new(CX, 50, CZ), Vector3.new(140, 2, 140)) -- ceiling
-
-	return folder
-end
-
---------------------------------------------------------------------------------
--- BUILD SHADOW REALM (dark underworld arena)
---------------------------------------------------------------------------------
-
-local function buildShadowRealm()
-	local folder = Instance.new("Folder")
-	folder.Name = "ShadowRealm"
-	folder.Parent = Workspace
-
-	local CX, CZ = 400, 0  -- shadow realm center
-
-	-- Void floor far below (neon lava layer visible through gaps)
-	local lavaFloor = createPart({
-		Name = "LavaFloor",
-		Size = Vector3.new(200, 2, 200),
-		Position = Vector3.new(CX, -12, CZ),
-		Color = Color3.fromRGB(255, 80, 0),
-		Material = Enum.Material.Neon,
-	})
-	lavaFloor.Parent = folder
-
-	-- Main fighting platform: dark obsidian
-	local platform = createPart({
-		Name = "ShadowPlatform",
-		Size = Vector3.new(100, 4, 100),
-		Position = Vector3.new(CX, -2, CZ),
-		Color = Color3.fromRGB(25, 20, 30),
-		Material = Enum.Material.Basalt,
-	})
-	platform.Parent = folder
-
-	-- Cracked stone surface layer
-	local surface = createPart({
-		Name = "ShadowSurface",
-		Size = Vector3.new(90, 0.5, 90),
-		Position = Vector3.new(CX, 0.25, CZ),
-		Color = Color3.fromRGB(35, 30, 40),
-		Material = Enum.Material.Slate,
-	})
-	surface.Parent = folder
-
-	-- LAVA CHANNELS: rivers of lava carved into the platform edges
-	local lavaChannels = {
-		-- Outer ring channels (gaps showing lava below)
-		{ pos = Vector3.new(CX - 42, -0.5, CZ), size = Vector3.new(3, 1, 80) },
-		{ pos = Vector3.new(CX + 42, -0.5, CZ), size = Vector3.new(3, 1, 80) },
-		{ pos = Vector3.new(CX, -0.5, CZ - 42), size = Vector3.new(80, 1, 3) },
-		{ pos = Vector3.new(CX, -0.5, CZ + 42), size = Vector3.new(80, 1, 3) },
-		-- Cross channels
-		{ pos = Vector3.new(CX - 20, -0.5, CZ - 20), size = Vector3.new(2, 1, 30) },
-		{ pos = Vector3.new(CX + 20, -0.5, CZ + 20), size = Vector3.new(2, 1, 30) },
-	}
-
-	for i, lc in ipairs(lavaChannels) do
-		local channel = createPart({
-			Name = "LavaChannel_" .. i,
-			Size = lc.size,
-			Position = lc.pos,
-			Color = Color3.fromRGB(255, 100, 0),
-			Material = Enum.Material.Neon,
-		})
-		channel.CanCollide = false
-		channel.Parent = folder
-
-		local lavaLight = Instance.new("PointLight")
-		lavaLight.Color = Color3.fromRGB(255, 80, 0)
-		lavaLight.Brightness = 1.5
-		lavaLight.Range = 12
-		lavaLight.Parent = channel
-	end
-
-	-- LAVA POOLS: bubbling lava pools at corners
-	local poolPositions = {
-		Vector3.new(CX - 35, -0.3, CZ - 35),
-		Vector3.new(CX + 35, -0.3, CZ - 35),
-		Vector3.new(CX - 35, -0.3, CZ + 35),
-		Vector3.new(CX + 35, -0.3, CZ + 35),
-	}
-
-	for i, poolPos in ipairs(poolPositions) do
-		local pool = createPart({
-			Name = "LavaPool_" .. i,
-			Shape = Enum.PartType.Cylinder,
-			Size = Vector3.new(1, 10, 10),
-			CFrame = CFrame.new(poolPos),
-			Color = Color3.fromRGB(255, 60, 0),
-			Material = Enum.Material.Neon,
-		})
-		pool.CanCollide = false
-		pool.Parent = folder
-
-		local poolLight = Instance.new("PointLight")
-		poolLight.Color = Color3.fromRGB(255, 100, 0)
-		poolLight.Brightness = 3
-		poolLight.Range = 20
-		poolLight.Parent = pool
-	end
-
-	-- OBSIDIAN PILLARS: dark stone columns around the arena
-	local pillarData = {
-		{ pos = Vector3.new(CX - 30, 10, CZ - 30), height = 20, width = 4 },
-		{ pos = Vector3.new(CX + 30, 12, CZ - 30), height = 24, width = 3.5 },
-		{ pos = Vector3.new(CX - 30, 11, CZ + 30), height = 22, width = 3.5 },
-		{ pos = Vector3.new(CX + 30, 9, CZ + 30), height = 18, width = 4 },
-		{ pos = Vector3.new(CX - 38, 14, CZ), height = 28, width = 5 },
-		{ pos = Vector3.new(CX + 38, 13, CZ), height = 26, width = 5 },
-		{ pos = Vector3.new(CX, 15, CZ - 38), height = 30, width = 4.5 },
-		{ pos = Vector3.new(CX, 11, CZ + 38), height = 22, width = 4.5 },
-	}
-
-	for i, pd in ipairs(pillarData) do
-		local pillar = createPart({
-			Name = "ObsidianPillar_" .. i,
-			Size = Vector3.new(pd.width, pd.height, pd.width),
-			Position = pd.pos,
-			Color = Color3.fromRGB(20, 15, 25),
-			Material = Enum.Material.Basalt,
-		})
-		pillar.Parent = folder
-
-		-- Glowing rune accent at top
-		local runeAccent = createPart({
-			Name = "PillarRune_" .. i,
-			Size = Vector3.new(pd.width + 0.5, 1.5, pd.width + 0.5),
-			Position = pd.pos + Vector3.new(0, pd.height / 2 - 0.5, 0),
-			Color = Color3.fromRGB(160, 40, 200),
-			Material = Enum.Material.Neon,
-		})
-		runeAccent.Parent = folder
-
-		local runeLight = Instance.new("PointLight")
-		runeLight.Color = Color3.fromRGB(140, 30, 180)
-		runeLight.Brightness = 2
-		runeLight.Range = 15
-		runeLight.Parent = runeAccent
-	end
-
-	-- CENTER RUNE CIRCLE: glowing ritual circle on the ground
-	-- Outer ring
-	local runeRingOuter = createPart({
-		Name = "RuneRingOuter",
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(0.15, 30, 30),
-		Position = Vector3.new(CX, 0.55, CZ),
-		Color = Color3.fromRGB(180, 50, 220),
-		Material = Enum.Material.Neon,
-	})
-	runeRingOuter.CanCollide = false
-	runeRingOuter.Parent = folder
-
-	-- Inner ring
-	local runeRingInner = createPart({
-		Name = "RuneRingInner",
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(0.15, 18, 18),
-		Position = Vector3.new(CX, 0.56, CZ),
-		Color = Color3.fromRGB(120, 30, 160),
-		Material = Enum.Material.Neon,
-	})
-	runeRingInner.CanCollide = false
-	runeRingInner.Parent = folder
-
-	-- Fill inside the inner ring to hide the neon
-	local runeFill = createPart({
-		Name = "RuneFill",
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(0.14, 17, 17),
-		Position = Vector3.new(CX, 0.555, CZ),
-		Color = Color3.fromRGB(35, 30, 40),
-		Material = Enum.Material.Slate,
-	})
-	runeFill.CanCollide = false
-	runeFill.Parent = folder
-
-	-- Rune lines (radial spokes inside the circle)
-	for i = 1, 8 do
-		local angle = math.rad(i * 45)
-		local lineLength = 14
-		local midX = CX + math.cos(angle) * lineLength / 2
-		local midZ = CZ + math.sin(angle) * lineLength / 2
-
-		local runeLine = createPart({
-			Name = "RuneLine_" .. i,
-			Size = Vector3.new(0.3, 0.1, lineLength),
-			CFrame = CFrame.lookAt(
-				Vector3.new(midX, 0.58, midZ),
-				Vector3.new(CX + math.cos(angle) * lineLength, 0.58, CZ + math.sin(angle) * lineLength)
-			),
-			Color = Color3.fromRGB(160, 40, 200),
-			Material = Enum.Material.Neon,
-		})
-		runeLine.CanCollide = false
-		runeLine.Parent = folder
-	end
-
-	-- Central rune glow
-	local centerGlow = Instance.new("PointLight")
-	centerGlow.Color = Color3.fromRGB(140, 30, 180)
-	centerGlow.Brightness = 2
-	centerGlow.Range = 25
-	centerGlow.Parent = runeRingOuter
-
-	-- FLOATING ROCKS: hovering chunks of dark stone above the arena
-	local floatingRocks = {
-		{ pos = Vector3.new(CX - 25, 25, CZ - 20), size = Vector3.new(8, 4, 6), rot = Vector3.new(10, 30, -5) },
-		{ pos = Vector3.new(CX + 20, 30, CZ + 15), size = Vector3.new(10, 5, 7), rot = Vector3.new(-8, 45, 12) },
-		{ pos = Vector3.new(CX + 30, 22, CZ - 25), size = Vector3.new(6, 3, 8), rot = Vector3.new(15, -20, 8) },
-		{ pos = Vector3.new(CX - 15, 35, CZ + 28), size = Vector3.new(12, 6, 9), rot = Vector3.new(-5, 60, -10) },
-		{ pos = Vector3.new(CX, 40, CZ), size = Vector3.new(14, 5, 14), rot = Vector3.new(3, 0, 3) },
-		{ pos = Vector3.new(CX - 35, 28, CZ + 10), size = Vector3.new(7, 3, 5), rot = Vector3.new(20, -40, 5) },
-		{ pos = Vector3.new(CX + 10, 33, CZ - 35), size = Vector3.new(9, 4, 6), rot = Vector3.new(-12, 25, -8) },
-	}
-
-	for i, rock in ipairs(floatingRocks) do
-		local floater = createPart({
-			Name = "FloatingRock_" .. i,
-			Size = rock.size,
-			Position = rock.pos,
-			Rotation = rock.rot,
-			Color = Color3.fromRGB(30 + math.random(-5, 5), 25 + math.random(-5, 5), 35 + math.random(-5, 5)),
-			Material = Enum.Material.Basalt,
-		})
-		floater.Parent = folder
-
-		-- Underside glow (lava light from below)
-		local underGlow = Instance.new("PointLight")
-		underGlow.Color = Color3.fromRGB(255, 80, 0)
-		underGlow.Brightness = 0.8
-		underGlow.Range = 10
-		underGlow.Parent = floater
-	end
-
-	-- CHAINS: hanging from floating rocks
-	local chainAnchors = {
-		{ from = Vector3.new(CX - 25, 22, CZ - 20), length = 18 },
-		{ from = Vector3.new(CX + 20, 26, CZ + 15), length = 22 },
-		{ from = Vector3.new(CX, 36, CZ), length = 32 },
-		{ from = Vector3.new(CX - 15, 30, CZ + 28), length = 26 },
-	}
-
-	for i, chain in ipairs(chainAnchors) do
-		local numLinks = math.floor(chain.length / 2)
-		for j = 0, numLinks - 1 do
-			local link = createPart({
-				Name = "ChainLink_" .. i .. "_" .. j,
-				Size = Vector3.new(0.4, 2, 0.4),
-				Position = chain.from + Vector3.new(0, -j * 2, 0),
-				Color = Color3.fromRGB(50, 45, 40),
-				Material = Enum.Material.Metal,
-			})
-			link.CanCollide = false
-			link.Parent = folder
-		end
-	end
-
-	-- SKULL PEDESTALS at spawn points
-	for _, spawnOffset in ipairs({ Vector3.new(0, 0, -20), Vector3.new(0, 0, 20) }) do
-		local pedestalPos = Vector3.new(CX, 0, CZ) + spawnOffset
-
-		-- Pedestal base
 		local pedestal = createPart({
-			Name = "SkullPedestal",
-			Size = Vector3.new(5, 1.5, 5),
-			Position = pedestalPos + Vector3.new(0, 0.75, 0),
-			Color = Color3.fromRGB(40, 35, 45),
-			Material = Enum.Material.Basalt,
+			Name = "Pedestal_" .. charKey, Size = Vector3.new(6, 1, 6),
+			Position = Vector3.new(xPos, 0.5, -25),
+			Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(50, 50, 55), Parent = lobbyFolder,
 		})
-		pedestal.Parent = folder
 
-		-- Pedestal accent ring
-		local pedestalRing = createPart({
-			Name = "PedestalRing",
-			Shape = Enum.PartType.Cylinder,
-			Size = Vector3.new(0.3, 6, 6),
-			Position = pedestalPos + Vector3.new(0, 1.5, 0),
-			Color = Color3.fromRGB(180, 50, 220),
-			Material = Enum.Material.Neon,
+		createPart({
+			Name = "AccentRing_" .. charKey, Size = Vector3.new(6.2, 0.2, 6.2),
+			Position = Vector3.new(xPos, 1.1, -25),
+			Material = Enum.Material.Neon, Color = charInfo.Colors.Primary, Parent = lobbyFolder,
 		})
-		pedestalRing.CanCollide = false
-		pedestalRing.Parent = folder
 
-		-- Skull (simplified: sphere with smaller sphere eyes)
-		local skull = createPart({
-			Name = "Skull",
-			Shape = Enum.PartType.Ball,
-			Size = Vector3.new(2.5, 2.5, 2.5),
-			Position = pedestalPos + Vector3.new(0, 3, 0),
-			Color = Color3.fromRGB(200, 190, 170),
-			Material = Enum.Material.SmoothPlastic,
+		createPart({
+			Name = "CharModel_" .. charKey, Size = Vector3.new(2, 4.5, 1.5),
+			Position = Vector3.new(xPos, 3.5, -25),
+			Material = Enum.Material.SmoothPlastic, Color = charInfo.BodyColor, Parent = lobbyFolder,
 		})
-		skull.Parent = folder
 
-		-- Skull eyes
-		for _, eyeOffset in ipairs({ Vector3.new(-0.4, 0.2, -1), Vector3.new(0.4, 0.2, -1) }) do
-			local eye = createPart({
-				Name = "SkullEye",
-				Shape = Enum.PartType.Ball,
-				Size = Vector3.new(0.5, 0.5, 0.5),
-				Position = pedestalPos + Vector3.new(0, 3, 0) + eyeOffset,
-				Color = Color3.fromRGB(255, 30, 0),
-				Material = Enum.Material.Neon,
-			})
-			eye.Parent = folder
+		local head = Instance.new("Part")
+		head.Name = "CharHead_" .. charKey
+		head.Shape = Enum.PartType.Ball
+		head.Size = Vector3.new(1.8, 1.8, 1.8)
+		head.Position = Vector3.new(xPos, 6.5, -25)
+		head.Anchored = true
+		head.Material = Enum.Material.SmoothPlastic
+		head.Color = Color3.fromRGB(245, 205, 170)
+		head.Parent = lobbyFolder
 
-			local eyeGlow = Instance.new("PointLight")
-			eyeGlow.Color = Color3.fromRGB(255, 30, 0)
-			eyeGlow.Brightness = 2
-			eyeGlow.Range = 6
-			eyeGlow.Parent = eye
-		end
+		local nameSign = createPart({
+			Name = "NameSign_" .. charKey, Size = Vector3.new(5, 2, 0.3),
+			Position = Vector3.new(xPos, 8.5, -25),
+			Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(40, 40, 45), Parent = lobbyFolder,
+		})
+
+		local nameGui = Instance.new("SurfaceGui")
+		nameGui.Face = Enum.NormalId.Front
+		nameGui.Parent = nameSign
+
+		local nameLabel = Instance.new("TextLabel")
+		nameLabel.Size = UDim2.new(1, 0, 0.6, 0)
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.Text = charInfo.DisplayName
+		nameLabel.TextColor3 = charInfo.Colors.Primary
+		nameLabel.TextStrokeTransparency = 0.3
+		nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+		nameLabel.TextScaled = true
+		nameLabel.Font = Enum.Font.GothamBold
+		nameLabel.Parent = nameGui
+
+		local descLabel = Instance.new("TextLabel")
+		descLabel.Size = UDim2.new(0.9, 0, 0.35, 0)
+		descLabel.Position = UDim2.new(0.05, 0, 0.6, 0)
+		descLabel.BackgroundTransparency = 1
+		descLabel.Text = charInfo.Description
+		descLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+		descLabel.TextStrokeTransparency = 0.5
+		descLabel.TextScaled = true
+		descLabel.Font = Enum.Font.Gotham
+		descLabel.TextWrapped = true
+		descLabel.Parent = nameGui
+
+		local accentLight = Instance.new("PointLight")
+		accentLight.Color = charInfo.Colors.Primary
+		accentLight.Brightness = 1.5
+		accentLight.Range = 12
+		accentLight.Parent = pedestal
+
+		pedestal:SetAttribute("CharacterKey", charKey)
 	end
 
-	-- EDGE FLAMES: fire-colored neon pillars along the platform edge
-	for i = 0, 7 do
-		local angle = math.rad(i * 45 + 22.5)
-		local dist = 44
-		local flamePos = Vector3.new(CX + math.cos(angle) * dist, 3, CZ + math.sin(angle) * dist)
+	-- Spawn
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Name = "LobbySpawn"
+	spawn.Size = Vector3.new(10, 1, 10)
+	spawn.Position = Vector3.new(0, 0.5, 15)
+	spawn.Anchored = true
+	spawn.Material = Enum.Material.SmoothPlastic
+	spawn.Color = Color3.fromRGB(100, 100, 105)
+	spawn.Transparency = 0.5
+	spawn.Parent = lobbyFolder
 
-		local flameBase = createPart({
-			Name = "FlameBase_" .. i,
-			Size = Vector3.new(2, 6, 2),
-			Position = flamePos,
-			Color = Color3.fromRGB(40, 30, 45),
-			Material = Enum.Material.Basalt,
-		})
-		flameBase.Parent = folder
-
-		-- Flame tip (neon)
-		local flameTip = createPart({
-			Name = "FlameTip_" .. i,
-			Shape = Enum.PartType.Ball,
-			Size = Vector3.new(2.5, 3.5, 2.5),
-			Position = flamePos + Vector3.new(0, 5, 0),
-			Color = Color3.fromRGB(255, 100, 0),
-			Material = Enum.Material.Neon,
-		})
-		flameTip.Parent = folder
-
-		local flameLight = Instance.new("PointLight")
-		flameLight.Color = Color3.fromRGB(255, 80, 0)
-		flameLight.Brightness = 2.5
-		flameLight.Range = 18
-		flameLight.Parent = flameTip
-	end
-
-	-- BROKEN ROCK DEBRIS on the platform surface
-	local debrisPositions = {
-		Vector3.new(CX + 12, 0, CZ + 8),
-		Vector3.new(CX - 15, 0, CZ - 10),
-		Vector3.new(CX + 8, 0, CZ - 15),
-		Vector3.new(CX - 10, 0, CZ + 12),
+	-- Lobby buildings
+	local lobbyBuildings = {
+		{ pos = Vector3.new(-40, 0, -40), size = Vector3.new(18, 28, 15) },
+		{ pos = Vector3.new(40, 0, -40), size = Vector3.new(16, 34, 14) },
+		{ pos = Vector3.new(-45, 0, 10), size = Vector3.new(12, 22, 18) },
+		{ pos = Vector3.new(45, 0, 10), size = Vector3.new(14, 26, 16) },
 	}
-	for _, dPos in ipairs(debrisPositions) do
-		for j = 1, math.random(2, 4) do
-			local debris = createPart({
-				Name = "ShadowDebris",
-				Size = Vector3.new(
-					math.random() * 2 + 0.5,
-					math.random() * 1 + 0.3,
-					math.random() * 2 + 0.5
-				),
-				Position = dPos + Vector3.new(
-					(math.random() - 0.5) * 5,
-					math.random() * 0.5 + 0.3,
-					(math.random() - 0.5) * 5
-				),
-				Color = Color3.fromRGB(
-					30 + math.random(-5, 10),
-					25 + math.random(-5, 10),
-					35 + math.random(-5, 10)
-				),
-				Material = Enum.Material.Basalt,
-				Rotation = Vector3.new(
-					math.random() * 25,
-					math.random() * 360,
-					math.random() * 25
-				),
-			})
-			debris.Parent = folder
-		end
+	for i, b in ipairs(lobbyBuildings) do
+		createBuilding("LobbyBuilding" .. i, b.pos, b.size, nil, lobbyFolder)
 	end
 
-	-- Arena spawn points (invisible)
-	local spawnA = Instance.new("SpawnLocation")
-	spawnA.Name = "ShadowSpawnA"
-	spawnA.Anchored = true
-	spawnA.Size = Vector3.new(6, 0.2, 6)
-	spawnA.Position = Vector3.new(CX, 0.6, CZ - 20)
-	spawnA.TopSurface = Enum.SurfaceType.Smooth
-	spawnA.CanCollide = true
-	spawnA.Enabled = false
-	spawnA.Transparency = 1
-	spawnA.Parent = folder
-
-	local spawnB = Instance.new("SpawnLocation")
-	spawnB.Name = "ShadowSpawnB"
-	spawnB.Anchored = true
-	spawnB.Size = Vector3.new(6, 0.2, 6)
-	spawnB.Position = Vector3.new(CX, 0.6, CZ + 20)
-	spawnB.TopSurface = Enum.SurfaceType.Smooth
-	spawnB.CanCollide = true
-	spawnB.Enabled = false
-	spawnB.Transparency = 1
-	spawnB.Parent = folder
-
-	-- Invisible boundaries
-	createInvisibleWall(folder, Vector3.new(CX, 20, CZ - 52), Vector3.new(110, 40, 2))
-	createInvisibleWall(folder, Vector3.new(CX, 20, CZ + 52), Vector3.new(110, 40, 2))
-	createInvisibleWall(folder, Vector3.new(CX - 52, 20, CZ), Vector3.new(2, 40, 110))
-	createInvisibleWall(folder, Vector3.new(CX + 52, 20, CZ), Vector3.new(2, 40, 110))
-	createInvisibleWall(folder, Vector3.new(CX, 55, CZ), Vector3.new(110, 2, 110)) -- ceiling
-
-	return folder
+	createStreetLamp(Vector3.new(-15, 0, -10), lobbyFolder)
+	createStreetLamp(Vector3.new(15, 0, -10), lobbyFolder)
+	createStreetLamp(Vector3.new(-15, 0, 30), lobbyFolder)
+	createStreetLamp(Vector3.new(15, 0, 30), lobbyFolder)
 end
 
 --------------------------------------------------------------------------------
--- BUILD EVERYTHING
+-- CITY ARENA
 --------------------------------------------------------------------------------
 
-setupEnvironment()
+local function buildCityArena()
+	local arenaFolder = Instance.new("Folder")
+	arenaFolder.Name = "CityArena"
+	arenaFolder.Parent = workspace
 
-local lobby = buildLobby()
-local arena = buildArena()
-local shadowRealm = buildShadowRealm()
+	local O = Vector3.new(300, 0, 0) -- arena origin offset
 
--- Store spawn positions as attributes for MatchManager (City Arena)
-arena:SetAttribute("SpawnA_X", 200)
-arena:SetAttribute("SpawnA_Y", 1)
-arena:SetAttribute("SpawnA_Z", -20)
-arena:SetAttribute("SpawnB_X", 200)
-arena:SetAttribute("SpawnB_Y", 1)
-arena:SetAttribute("SpawnB_Z", 20)
-arena:SetAttribute("LobbySpawn_X", 0)
-arena:SetAttribute("LobbySpawn_Y", 1)
-arena:SetAttribute("LobbySpawn_Z", 0)
+	-- Ground
+	createPart({
+		Name = "ArenaGround", Size = Vector3.new(200, 1, 200),
+		Position = O + Vector3.new(0, -0.5, 0),
+		Material = Enum.Material.Concrete, Color = Color3.fromRGB(130, 128, 125), Parent = arenaFolder,
+	})
 
--- Store spawn positions for Shadow Realm
-shadowRealm:SetAttribute("SpawnA_X", 400)
-shadowRealm:SetAttribute("SpawnA_Y", 1)
-shadowRealm:SetAttribute("SpawnA_Z", -20)
-shadowRealm:SetAttribute("SpawnB_X", 400)
-shadowRealm:SetAttribute("SpawnB_Y", 1)
-shadowRealm:SetAttribute("SpawnB_Z", 20)
+	-- Roads
+	createPart({
+		Name = "MainRoad", Size = Vector3.new(20, 0.06, 200),
+		Position = O + Vector3.new(0, 0.03, 0),
+		Material = Enum.Material.Asphalt, Color = Color3.fromRGB(55, 55, 60), Parent = arenaFolder,
+	})
+	createPart({
+		Name = "CrossRoad", Size = Vector3.new(200, 0.06, 20),
+		Position = O + Vector3.new(0, 0.03, 0),
+		Material = Enum.Material.Asphalt, Color = Color3.fromRGB(55, 55, 60), Parent = arenaFolder,
+	})
 
-print("[ArenaBuilder] All arenas built!")
-print("  Lobby plaza: (0, 1, 0)")
-print("  City Arena: (200, 1, -20) / (200, 1, 20)")
-print("  Shadow Realm: (400, 1, -20) / (400, 1, 20)")
+	createRoadLine(O + Vector3.new(0, 0, -95), O + Vector3.new(0, 0, 95), true, arenaFolder)
+	createRoadLine(O + Vector3.new(-95, 0, 0), O + Vector3.new(95, 0, 0), true, arenaFolder)
+
+	-- Surrounding buildings
+	local buildings = {
+		{ pos = Vector3.new(-60, 0, -85), size = Vector3.new(25, 40, 20) },
+		{ pos = Vector3.new(-20, 0, -85), size = Vector3.new(22, 32, 18) },
+		{ pos = Vector3.new(25, 0, -85), size = Vector3.new(28, 44, 22) },
+		{ pos = Vector3.new(65, 0, -85), size = Vector3.new(20, 28, 16) },
+		{ pos = Vector3.new(-55, 0, 85), size = Vector3.new(24, 36, 18) },
+		{ pos = Vector3.new(-15, 0, 85), size = Vector3.new(20, 30, 20) },
+		{ pos = Vector3.new(30, 0, 85), size = Vector3.new(26, 38, 16) },
+		{ pos = Vector3.new(70, 0, 85), size = Vector3.new(18, 24, 18) },
+		{ pos = Vector3.new(85, 0, -45), size = Vector3.new(18, 34, 22) },
+		{ pos = Vector3.new(85, 0, 5), size = Vector3.new(20, 42, 24) },
+		{ pos = Vector3.new(85, 0, 50), size = Vector3.new(16, 26, 18) },
+		{ pos = Vector3.new(-85, 0, -40), size = Vector3.new(20, 30, 20) },
+		{ pos = Vector3.new(-85, 0, 15), size = Vector3.new(22, 38, 22) },
+		{ pos = Vector3.new(-85, 0, 55), size = Vector3.new(18, 28, 16) },
+	}
+	for i, b in ipairs(buildings) do
+		createBuilding("ArenaBuilding" .. i, O + b.pos, b.size, nil, arenaFolder)
+	end
+
+	-- Lamps
+	for _, pos in ipairs({
+		Vector3.new(-35, 0, -35), Vector3.new(35, 0, -35),
+		Vector3.new(-35, 0, 35), Vector3.new(35, 0, 35),
+		Vector3.new(-55, 0, 0), Vector3.new(55, 0, 0),
+		Vector3.new(0, 0, -55), Vector3.new(0, 0, 55),
+	}) do
+		createStreetLamp(O + pos, arenaFolder)
+	end
+
+	-- Cars
+	createCar(O + Vector3.new(-30, 0, -15), Color3.fromRGB(180, 50, 50), 15, arenaFolder)
+	createCar(O + Vector3.new(25, 0, 20), Color3.fromRGB(50, 80, 180), -25, arenaFolder)
+	createCar(O + Vector3.new(-40, 0, 30), Color3.fromRGB(60, 60, 65), 80, arenaFolder)
+	createCar(O + Vector3.new(45, 0, -25), Color3.fromRGB(230, 220, 200), 45, arenaFolder)
+
+	-- Barriers
+	createBarrier(O + Vector3.new(-20, 0, 30), 0, arenaFolder)
+	createBarrier(O + Vector3.new(15, 0, -20), 90, arenaFolder)
+	createBarrier(O + Vector3.new(30, 0, 40), 45, arenaFolder)
+	createBarrier(O + Vector3.new(-35, 0, -30), 120, arenaFolder)
+
+	-- Rubble
+	for _, pos in ipairs({
+		Vector3.new(10, 0, 10), Vector3.new(-25, 0, -20), Vector3.new(40, 0, -10),
+		Vector3.new(-10, 0, 35), Vector3.new(20, 0, -40), Vector3.new(-45, 0, 15),
+	}) do
+		createRubble(O + pos, arenaFolder)
+	end
+
+	-- Spawn points
+	local spawnPoints = {
+		O + Vector3.new(0, 3, 0),
+		O + Vector3.new(30, 3, 30), O + Vector3.new(-30, 3, -30),
+		O + Vector3.new(30, 3, -30), O + Vector3.new(-30, 3, 30),
+		O + Vector3.new(50, 3, 0), O + Vector3.new(-50, 3, 0),
+		O + Vector3.new(0, 3, 50), O + Vector3.new(0, 3, -50),
+	}
+	for i, pos in ipairs(spawnPoints) do
+		arenaFolder:SetAttribute("Spawn" .. i, pos)
+	end
+	arenaFolder:SetAttribute("SpawnCount", #spawnPoints)
+
+	-- Boundary walls
+	local half = 101
+	local h = 50
+	createInvisibleWall("NorthWall", O + Vector3.new(0, h / 2, -half), Vector3.new(202, h, 2), arenaFolder)
+	createInvisibleWall("SouthWall", O + Vector3.new(0, h / 2, half), Vector3.new(202, h, 2), arenaFolder)
+	createInvisibleWall("EastWall", O + Vector3.new(half, h / 2, 0), Vector3.new(2, h, 202), arenaFolder)
+	createInvisibleWall("WestWall", O + Vector3.new(-half, h / 2, 0), Vector3.new(2, h, 202), arenaFolder)
+end
+
+--------------------------------------------------------------------------------
+-- BUILD
+--------------------------------------------------------------------------------
+
+setupLighting()
+buildLobby()
+buildCityArena()
+
+print("[ArenaBuilder] World generated - Lobby + City Arena")

@@ -1,15 +1,23 @@
 --[[
 	UIController (Client)
-	Manages all HUD elements: health bar, stamina bar, ability cooldowns,
-	ultimate meter, dash cooldowns, ragdoll indicator, critical hit flash,
-	round score, and queue UI.
+	TSB-style HUD:
+	  - Health bar
+	  - Stamina bar
+	  - Awakening meter
+	  - Move cooldown icons (Q/E/R/T/G)
+	  - Kill feed
+	  - Respawn timer
+	  - Character selection UI
+	  - Ragdoll / Critical indicators
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CombatConfig = require(Shared:WaitForChild("CombatConfig"))
+local CharacterData = require(Shared:WaitForChild("CharacterData"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local player = Players.LocalPlayer
@@ -20,14 +28,13 @@ local playerGui = player:WaitForChild("PlayerGui")
 --------------------------------------------------------------------------------
 
 local function createHUD()
-	-- Main ScreenGui
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "CombatHUD"
 	screenGui.ResetOnSpawn = false
 	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	screenGui.Parent = playerGui
 
-	-- ===== HEALTH BAR (top center) =====
+	-- Health bar
 	local healthFrame = Instance.new("Frame")
 	healthFrame.Name = "HealthFrame"
 	healthFrame.Size = UDim2.new(0.4, 0, 0, 30)
@@ -35,10 +42,7 @@ local function createHUD()
 	healthFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 	healthFrame.BorderSizePixel = 0
 	healthFrame.Parent = screenGui
-
-	local healthCorner = Instance.new("UICorner")
-	healthCorner.CornerRadius = UDim.new(0, 6)
-	healthCorner.Parent = healthFrame
+	Instance.new("UICorner", healthFrame).CornerRadius = UDim.new(0, 6)
 
 	local healthBar = Instance.new("Frame")
 	healthBar.Name = "HealthBar"
@@ -46,59 +50,28 @@ local function createHUD()
 	healthBar.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
 	healthBar.BorderSizePixel = 0
 	healthBar.Parent = healthFrame
-
-	local healthBarCorner = Instance.new("UICorner")
-	healthBarCorner.CornerRadius = UDim.new(0, 6)
-	healthBarCorner.Parent = healthBar
+	Instance.new("UICorner", healthBar).CornerRadius = UDim.new(0, 6)
 
 	local healthLabel = Instance.new("TextLabel")
 	healthLabel.Name = "HealthLabel"
 	healthLabel.Size = UDim2.new(1, 0, 1, 0)
 	healthLabel.BackgroundTransparency = 1
 	healthLabel.Text = "100 / 100"
-	healthLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	healthLabel.TextColor3 = Color3.new(1, 1, 1)
 	healthLabel.TextScaled = true
 	healthLabel.Font = Enum.Font.GothamBold
 	healthLabel.ZIndex = 2
 	healthLabel.Parent = healthFrame
 
-	-- ===== OPPONENT HEALTH BAR (top center, above player's) =====
-	local oppHealthFrame = Instance.new("Frame")
-	oppHealthFrame.Name = "OpponentHealthFrame"
-	oppHealthFrame.Size = UDim2.new(0.4, 0, 0, 24)
-	oppHealthFrame.Position = UDim2.new(0.3, 0, 0.01, 0)
-	oppHealthFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-	oppHealthFrame.BorderSizePixel = 0
-	oppHealthFrame.Visible = false
-	oppHealthFrame.Parent = screenGui
-
-	local oppCorner = Instance.new("UICorner")
-	oppCorner.CornerRadius = UDim.new(0, 6)
-	oppCorner.Parent = oppHealthFrame
-
-	local oppHealthBar = Instance.new("Frame")
-	oppHealthBar.Name = "HealthBar"
-	oppHealthBar.Size = UDim2.new(1, 0, 1, 0)
-	oppHealthBar.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-	oppHealthBar.BorderSizePixel = 0
-	oppHealthBar.Parent = oppHealthFrame
-
-	local oppHealthBarCorner = Instance.new("UICorner")
-	oppHealthBarCorner.CornerRadius = UDim.new(0, 6)
-	oppHealthBarCorner.Parent = oppHealthBar
-
-	-- ===== STAMINA BAR (below health) =====
+	-- Stamina bar
 	local staminaFrame = Instance.new("Frame")
 	staminaFrame.Name = "StaminaFrame"
-	staminaFrame.Size = UDim2.new(0.25, 0, 0, 12)
+	staminaFrame.Size = UDim2.new(0.25, 0, 0, 10)
 	staminaFrame.Position = UDim2.new(0.375, 0, 0.09, 0)
 	staminaFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 	staminaFrame.BorderSizePixel = 0
 	staminaFrame.Parent = screenGui
-
-	local staminaCorner = Instance.new("UICorner")
-	staminaCorner.CornerRadius = UDim.new(0, 4)
-	staminaCorner.Parent = staminaFrame
+	Instance.new("UICorner", staminaFrame).CornerRadius = UDim.new(0, 4)
 
 	local staminaBar = Instance.new("Frame")
 	staminaBar.Name = "StaminaBar"
@@ -106,51 +79,74 @@ local function createHUD()
 	staminaBar.BackgroundColor3 = Color3.fromRGB(50, 150, 255)
 	staminaBar.BorderSizePixel = 0
 	staminaBar.Parent = staminaFrame
+	Instance.new("UICorner", staminaBar).CornerRadius = UDim.new(0, 4)
 
-	local staminaBarCorner = Instance.new("UICorner")
-	staminaBarCorner.CornerRadius = UDim.new(0, 4)
-	staminaBarCorner.Parent = staminaBar
+	-- Awakening meter
+	local awakeFrame = Instance.new("Frame")
+	awakeFrame.Name = "AwakeningFrame"
+	awakeFrame.Size = UDim2.new(0.2, 0, 0, 8)
+	awakeFrame.Position = UDim2.new(0.4, 0, 0.105, 0)
+	awakeFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	awakeFrame.BorderSizePixel = 0
+	awakeFrame.Parent = screenGui
+	Instance.new("UICorner", awakeFrame).CornerRadius = UDim.new(0, 3)
 
-	-- ===== ABILITY COOLDOWN ICONS (bottom center) =====
-	local abilityFrame = Instance.new("Frame")
-	abilityFrame.Name = "AbilityFrame"
-	abilityFrame.Size = UDim2.new(0, 280, 0, 60)
-	abilityFrame.Position = UDim2.new(0.5, -140, 0.88, 0)
-	abilityFrame.BackgroundTransparency = 1
-	abilityFrame.Parent = screenGui
+	local awakeBar = Instance.new("Frame")
+	awakeBar.Name = "AwakeBar"
+	awakeBar.Size = UDim2.new(0, 0, 1, 0)
+	awakeBar.BackgroundColor3 = Color3.fromRGB(255, 120, 30)
+	awakeBar.BorderSizePixel = 0
+	awakeBar.Parent = awakeFrame
+	Instance.new("UICorner", awakeBar).CornerRadius = UDim.new(0, 3)
 
-	local abilityLayout = Instance.new("UIListLayout")
-	abilityLayout.FillDirection = Enum.FillDirection.Horizontal
-	abilityLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	abilityLayout.Padding = UDim.new(0, 10)
-	abilityLayout.Parent = abilityFrame
+	local awakeLabel = Instance.new("TextLabel")
+	awakeLabel.Name = "AwakeLabel"
+	awakeLabel.Size = UDim2.new(1, 0, 0, 14)
+	awakeLabel.Position = UDim2.new(0, 0, 0, -16)
+	awakeLabel.BackgroundTransparency = 1
+	awakeLabel.Text = "AWAKENING [G]"
+	awakeLabel.TextColor3 = Color3.fromRGB(255, 150, 50)
+	awakeLabel.TextScaled = true
+	awakeLabel.Font = Enum.Font.GothamBold
+	awakeLabel.Parent = awakeFrame
 
-	local abilitySlots = { "Q", "E", "R", "F" }
-	local slotColors = {
-		Q = Color3.fromRGB(80, 180, 80),
-		E = Color3.fromRGB(80, 130, 220),
-		R = Color3.fromRGB(220, 130, 50),
-		F = Color3.fromRGB(220, 50, 50),
+	-- Move cooldown icons
+	local moveFrame = Instance.new("Frame")
+	moveFrame.Name = "MoveFrame"
+	moveFrame.Size = UDim2.new(0, 340, 0, 60)
+	moveFrame.Position = UDim2.new(0.5, -170, 0.88, 0)
+	moveFrame.BackgroundTransparency = 1
+	moveFrame.Parent = screenGui
+
+	local moveLayout = Instance.new("UIListLayout")
+	moveLayout.FillDirection = Enum.FillDirection.Horizontal
+	moveLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	moveLayout.Padding = UDim.new(0, 8)
+	moveLayout.Parent = moveFrame
+
+	local moveSlots = {
+		{ key = "Q", color = Color3.fromRGB(100, 200, 100), label = "Evasive" },
+		{ key = "E", color = Color3.fromRGB(80, 130, 220), label = "Move 1" },
+		{ key = "R", color = Color3.fromRGB(220, 130, 50), label = "Move 2" },
+		{ key = "T", color = Color3.fromRGB(180, 60, 180), label = "Move 3" },
+		{ key = "G", color = Color3.fromRGB(220, 50, 50), label = "Awaken" },
 	}
 
-	for _, slot in ipairs(abilitySlots) do
+	for _, slot in ipairs(moveSlots) do
 		local slotFrame = Instance.new("Frame")
-		slotFrame.Name = "Slot_" .. slot
+		slotFrame.Name = "Slot_" .. slot.key
 		slotFrame.Size = UDim2.new(0, 60, 0, 60)
-		slotFrame.BackgroundColor3 = slotColors[slot]
+		slotFrame.BackgroundColor3 = slot.color
 		slotFrame.BorderSizePixel = 0
-		slotFrame.Parent = abilityFrame
-
-		local slotCorner = Instance.new("UICorner")
-		slotCorner.CornerRadius = UDim.new(0, 8)
-		slotCorner.Parent = slotFrame
+		slotFrame.Parent = moveFrame
+		Instance.new("UICorner", slotFrame).CornerRadius = UDim.new(0, 8)
 
 		local keyLabel = Instance.new("TextLabel")
 		keyLabel.Name = "KeyLabel"
 		keyLabel.Size = UDim2.new(1, 0, 0.5, 0)
 		keyLabel.BackgroundTransparency = 1
-		keyLabel.Text = slot
-		keyLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		keyLabel.Text = slot.key
+		keyLabel.TextColor3 = Color3.new(1, 1, 1)
 		keyLabel.TextScaled = true
 		keyLabel.Font = Enum.Font.GothamBold
 		keyLabel.Parent = slotFrame
@@ -161,528 +157,387 @@ local function createHUD()
 		cooldownLabel.Position = UDim2.new(0, 0, 0.5, 0)
 		cooldownLabel.BackgroundTransparency = 1
 		cooldownLabel.Text = ""
-		cooldownLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		cooldownLabel.TextColor3 = Color3.new(1, 1, 1)
 		cooldownLabel.TextScaled = true
 		cooldownLabel.Font = Enum.Font.Gotham
 		cooldownLabel.Parent = slotFrame
 
-		-- Dark overlay for when on cooldown
-		local cooldownOverlay = Instance.new("Frame")
-		cooldownOverlay.Name = "CooldownOverlay"
-		cooldownOverlay.Size = UDim2.new(1, 0, 1, 0)
-		cooldownOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-		cooldownOverlay.BackgroundTransparency = 1 -- hidden by default
-		cooldownOverlay.BorderSizePixel = 0
-		cooldownOverlay.ZIndex = 3
-		cooldownOverlay.Parent = slotFrame
-
-		local overlayCorner = Instance.new("UICorner")
-		overlayCorner.CornerRadius = UDim.new(0, 8)
-		overlayCorner.Parent = cooldownOverlay
+		local overlay = Instance.new("Frame")
+		overlay.Name = "CooldownOverlay"
+		overlay.Size = UDim2.new(1, 0, 1, 0)
+		overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		overlay.BackgroundTransparency = 1
+		overlay.BorderSizePixel = 0
+		overlay.ZIndex = 3
+		overlay.Parent = slotFrame
+		Instance.new("UICorner", overlay).CornerRadius = UDim.new(0, 8)
 	end
 
-	-- ===== ULTIMATE METER (above abilities) =====
-	local ultFrame = Instance.new("Frame")
-	ultFrame.Name = "UltimateFrame"
-	ultFrame.Size = UDim2.new(0, 200, 0, 10)
-	ultFrame.Position = UDim2.new(0.5, -100, 0.86, 0)
-	ultFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-	ultFrame.BorderSizePixel = 0
-	ultFrame.Parent = screenGui
-
-	local ultCorner = Instance.new("UICorner")
-	ultCorner.CornerRadius = UDim.new(0, 4)
-	ultCorner.Parent = ultFrame
-
-	local ultBar = Instance.new("Frame")
-	ultBar.Name = "UltBar"
-	ultBar.Size = UDim2.new(0, 0, 1, 0)
-	ultBar.BackgroundColor3 = Color3.fromRGB(255, 215, 0) -- gold
-	ultBar.BorderSizePixel = 0
-	ultBar.Parent = ultFrame
-
-	local ultBarCorner = Instance.new("UICorner")
-	ultBarCorner.CornerRadius = UDim.new(0, 4)
-	ultBarCorner.Parent = ultBar
-
-	local ultLabel = Instance.new("TextLabel")
-	ultLabel.Name = "UltLabel"
-	ultLabel.Size = UDim2.new(1, 0, 0, 16)
-	ultLabel.Position = UDim2.new(0, 0, 0, -18)
-	ultLabel.BackgroundTransparency = 1
-	ultLabel.Text = "ULTIMATE"
-	ultLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
-	ultLabel.TextScaled = true
-	ultLabel.Font = Enum.Font.GothamBold
-	ultLabel.Parent = ultFrame
-
-	-- ===== ROUND SCORE (top right) =====
-	local scoreLabel = Instance.new("TextLabel")
-	scoreLabel.Name = "ScoreLabel"
-	scoreLabel.Size = UDim2.new(0, 150, 0, 40)
-	scoreLabel.Position = UDim2.new(1, -160, 0.02, 0)
-	scoreLabel.BackgroundTransparency = 1
-	scoreLabel.Text = "Round: 0 - 0"
-	scoreLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	scoreLabel.TextScaled = true
-	scoreLabel.Font = Enum.Font.GothamBold
-	scoreLabel.Parent = screenGui
-
-	-- ===== CENTER ANNOUNCEMENT (for countdown, round results) =====
-	local announcement = Instance.new("TextLabel")
-	announcement.Name = "Announcement"
-	announcement.Size = UDim2.new(0.6, 0, 0, 80)
-	announcement.Position = UDim2.new(0.2, 0, 0.35, 0)
-	announcement.BackgroundTransparency = 1
-	announcement.Text = ""
-	announcement.TextColor3 = Color3.fromRGB(255, 255, 255)
-	announcement.TextStrokeTransparency = 0.5
-	announcement.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-	announcement.TextScaled = true
-	announcement.Font = Enum.Font.GothamBold
-	announcement.Visible = false
-	announcement.Parent = screenGui
-
-	-- ===== DASH COOLDOWN INDICATORS (above abilities, left side) =====
-	local dashFrame = Instance.new("Frame")
-	dashFrame.Name = "DashFrame"
-	dashFrame.Size = UDim2.new(0, 180, 0, 24)
-	dashFrame.Position = UDim2.new(0.5, -90, 0.84, -8)
-	dashFrame.BackgroundTransparency = 1
-	dashFrame.Parent = screenGui
-
-	local dashLayout = Instance.new("UIListLayout")
-	dashLayout.FillDirection = Enum.FillDirection.Horizontal
-	dashLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	dashLayout.Padding = UDim.new(0, 8)
-	dashLayout.Parent = dashFrame
-
-	-- Forward/Back dash indicator
-	local fbDash = Instance.new("Frame")
-	fbDash.Name = "FBDashCooldown"
-	fbDash.Size = UDim2.new(0, 80, 0, 20)
-	fbDash.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-	fbDash.BorderSizePixel = 0
-	fbDash.Parent = dashFrame
-
-	local fbCorner = Instance.new("UICorner")
-	fbCorner.CornerRadius = UDim.new(0, 4)
-	fbCorner.Parent = fbDash
-
-	local fbBar = Instance.new("Frame")
-	fbBar.Name = "Bar"
-	fbBar.Size = UDim2.new(1, 0, 1, 0)
-	fbBar.BackgroundColor3 = Color3.fromRGB(200, 160, 50)
-	fbBar.BorderSizePixel = 0
-	fbBar.Parent = fbDash
-
-	local fbBarCorner = Instance.new("UICorner")
-	fbBarCorner.CornerRadius = UDim.new(0, 4)
-	fbBarCorner.Parent = fbBar
-
-	local fbLabel = Instance.new("TextLabel")
-	fbLabel.Name = "Label"
-	fbLabel.Size = UDim2.new(1, 0, 1, 0)
-	fbLabel.BackgroundTransparency = 1
-	fbLabel.Text = "Q Dash"
-	fbLabel.TextColor3 = Color3.new(1, 1, 1)
-	fbLabel.TextScaled = true
-	fbLabel.Font = Enum.Font.GothamBold
-	fbLabel.ZIndex = 2
-	fbLabel.Parent = fbDash
-
-	-- Side dash indicator
-	local sideDash = Instance.new("Frame")
-	sideDash.Name = "SideDashCooldown"
-	sideDash.Size = UDim2.new(0, 80, 0, 20)
-	sideDash.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-	sideDash.BorderSizePixel = 0
-	sideDash.Parent = dashFrame
-
-	local sideCorner = Instance.new("UICorner")
-	sideCorner.CornerRadius = UDim.new(0, 4)
-	sideCorner.Parent = sideDash
-
-	local sideBar = Instance.new("Frame")
-	sideBar.Name = "Bar"
-	sideBar.Size = UDim2.new(1, 0, 1, 0)
-	sideBar.BackgroundColor3 = Color3.fromRGB(100, 180, 220)
-	sideBar.BorderSizePixel = 0
-	sideBar.Parent = sideDash
-
-	local sideBarCorner = Instance.new("UICorner")
-	sideBarCorner.CornerRadius = UDim.new(0, 4)
-	sideBarCorner.Parent = sideBar
-
-	local sideLabel = Instance.new("TextLabel")
-	sideLabel.Name = "Label"
-	sideLabel.Size = UDim2.new(1, 0, 1, 0)
-	sideLabel.BackgroundTransparency = 1
-	sideLabel.Text = "Side"
-	sideLabel.TextColor3 = Color3.new(1, 1, 1)
-	sideLabel.TextScaled = true
-	sideLabel.Font = Enum.Font.GothamBold
-	sideLabel.ZIndex = 2
-	sideLabel.Parent = sideDash
-
-	-- ===== RAGDOLL INDICATOR (center screen, shows when ragdolled) =====
+	-- Ragdoll indicator
 	local ragdollLabel = Instance.new("TextLabel")
 	ragdollLabel.Name = "RagdollLabel"
-	ragdollLabel.Size = UDim2.new(0, 300, 0, 40)
-	ragdollLabel.Position = UDim2.new(0.5, -150, 0.6, 0)
+	ragdollLabel.Size = UDim2.new(0, 280, 0, 35)
+	ragdollLabel.Position = UDim2.new(0.5, -140, 0.6, 0)
 	ragdollLabel.BackgroundTransparency = 1
-	ragdollLabel.Text = "RAGDOLLED - Press Q+A/D to recover!"
+	ragdollLabel.Text = "RAGDOLLED - Press Q to recover!"
 	ragdollLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
 	ragdollLabel.TextStrokeTransparency = 0.5
-	ragdollLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	ragdollLabel.TextScaled = true
 	ragdollLabel.Font = Enum.Font.GothamBold
 	ragdollLabel.Visible = false
 	ragdollLabel.Parent = screenGui
 
-	-- ===== CRITICAL HIT INDICATOR (below stamina, shows when you have critical buff) =====
+	-- Critical indicator
 	local critLabel = Instance.new("TextLabel")
 	critLabel.Name = "CriticalLabel"
-	critLabel.Size = UDim2.new(0, 200, 0, 20)
-	critLabel.Position = UDim2.new(0.5, -100, 0.11, 0)
+	critLabel.Size = UDim2.new(0, 180, 0, 18)
+	critLabel.Position = UDim2.new(0.5, -90, 0.12, 0)
 	critLabel.BackgroundTransparency = 1
 	critLabel.Text = "CRITICAL HIT READY!"
 	critLabel.TextColor3 = Color3.fromRGB(255, 240, 100)
 	critLabel.TextStrokeTransparency = 0.3
-	critLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	critLabel.TextScaled = true
 	critLabel.Font = Enum.Font.GothamBold
 	critLabel.Visible = false
 	critLabel.Parent = screenGui
 
-	-- ===== QUEUE BUTTON (lobby) =====
-	local queueButton = Instance.new("TextButton")
-	queueButton.Name = "QueueButton"
-	queueButton.Size = UDim2.new(0, 200, 0, 50)
-	queueButton.Position = UDim2.new(0.5, -100, 0.75, 0)
-	queueButton.BackgroundColor3 = Color3.fromRGB(60, 160, 60)
-	queueButton.Text = "FIND MATCH"
-	queueButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-	queueButton.TextScaled = true
-	queueButton.Font = Enum.Font.GothamBold
-	queueButton.BorderSizePixel = 0
-	queueButton.Parent = screenGui
+	-- Announcement
+	local announcement = Instance.new("TextLabel")
+	announcement.Name = "Announcement"
+	announcement.Size = UDim2.new(0.6, 0, 0, 60)
+	announcement.Position = UDim2.new(0.2, 0, 0.35, 0)
+	announcement.BackgroundTransparency = 1
+	announcement.Text = ""
+	announcement.TextColor3 = Color3.new(1, 1, 1)
+	announcement.TextStrokeTransparency = 0.5
+	announcement.TextScaled = true
+	announcement.Font = Enum.Font.GothamBold
+	announcement.Visible = false
+	announcement.Parent = screenGui
 
-	local queueCorner = Instance.new("UICorner")
-	queueCorner.CornerRadius = UDim.new(0, 10)
-	queueCorner.Parent = queueButton
+	-- Kill feed
+	local killFeedFrame = Instance.new("Frame")
+	killFeedFrame.Name = "KillFeedFrame"
+	killFeedFrame.Size = UDim2.new(0, 250, 0, 150)
+	killFeedFrame.Position = UDim2.new(1, -260, 0.02, 0)
+	killFeedFrame.BackgroundTransparency = 1
+	killFeedFrame.Parent = screenGui
+	local kfLayout = Instance.new("UIListLayout")
+	kfLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	kfLayout.Padding = UDim.new(0, 2)
+	kfLayout.Parent = killFeedFrame
 
-	-- ===== PRACTICE BUTTON (lobby) =====
-	local practiceButton = Instance.new("TextButton")
-	practiceButton.Name = "PracticeButton"
-	practiceButton.Size = UDim2.new(0, 200, 0, 50)
-	practiceButton.Position = UDim2.new(0.5, -100, 0.82, 0)
-	practiceButton.BackgroundColor3 = Color3.fromRGB(60, 100, 200)
-	practiceButton.Text = "PRACTICE vs BOT"
-	practiceButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-	practiceButton.TextScaled = true
-	practiceButton.Font = Enum.Font.GothamBold
-	practiceButton.BorderSizePixel = 0
-	practiceButton.Parent = screenGui
+	-- Respawn timer
+	local respawnLabel = Instance.new("TextLabel")
+	respawnLabel.Name = "RespawnLabel"
+	respawnLabel.Size = UDim2.new(0, 300, 0, 50)
+	respawnLabel.Position = UDim2.new(0.5, -150, 0.45, 0)
+	respawnLabel.BackgroundTransparency = 1
+	respawnLabel.Text = ""
+	respawnLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+	respawnLabel.TextStrokeTransparency = 0.3
+	respawnLabel.TextScaled = true
+	respawnLabel.Font = Enum.Font.GothamBold
+	respawnLabel.Visible = false
+	respawnLabel.Parent = screenGui
 
-	local practiceCorner = Instance.new("UICorner")
-	practiceCorner.CornerRadius = UDim.new(0, 10)
-	practiceCorner.Parent = practiceButton
+	-- Controls hint
+	local controlsLabel = Instance.new("TextLabel")
+	controlsLabel.Name = "ControlsHint"
+	controlsLabel.Size = UDim2.new(0, 200, 0, 100)
+	controlsLabel.Position = UDim2.new(0, 10, 0.82, 0)
+	controlsLabel.BackgroundTransparency = 0.6
+	controlsLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	controlsLabel.Text = "LMB: Attack\nF: Block\nQ: Evasive\nE/R/T: Moves\nG: Awakening\nShift: Sprint/Dash"
+	controlsLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+	controlsLabel.TextScaled = true
+	controlsLabel.Font = Enum.Font.Gotham
+	controlsLabel.TextXAlignment = Enum.TextXAlignment.Left
+	controlsLabel.TextWrapped = true
+	controlsLabel.Parent = screenGui
+	Instance.new("UICorner", controlsLabel).CornerRadius = UDim.new(0, 6)
 
 	return screenGui
 end
 
 --------------------------------------------------------------------------------
--- HUD UPDATE FUNCTIONS
+-- CHARACTER SELECT UI
+--------------------------------------------------------------------------------
+
+local function createCharacterSelectUI()
+	local selectGui = Instance.new("ScreenGui")
+	selectGui.Name = "CharacterSelect"
+	selectGui.ResetOnSpawn = false
+	selectGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	selectGui.DisplayOrder = 10
+	selectGui.Parent = playerGui
+
+	local bg = Instance.new("Frame")
+	bg.Name = "Background"
+	bg.Size = UDim2.new(1, 0, 1, 0)
+	bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	bg.BackgroundTransparency = 0.3
+	bg.Parent = selectGui
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(0.6, 0, 0, 60)
+	title.Position = UDim2.new(0.2, 0, 0.08, 0)
+	title.BackgroundTransparency = 1
+	title.Text = "SELECT YOUR FIGHTER"
+	title.TextColor3 = Color3.fromRGB(255, 80, 30)
+	title.TextStrokeTransparency = 0
+	title.TextScaled = true
+	title.Font = Enum.Font.GothamBold
+	title.Parent = selectGui
+
+	local cardsFrame = Instance.new("Frame")
+	cardsFrame.Name = "CardsFrame"
+	cardsFrame.Size = UDim2.new(0.9, 0, 0, 300)
+	cardsFrame.Position = UDim2.new(0.05, 0, 0.2, 0)
+	cardsFrame.BackgroundTransparency = 1
+	cardsFrame.Parent = selectGui
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.Padding = UDim.new(0, 15)
+	layout.Parent = cardsFrame
+
+	local characters = CharacterData.GetAllCharacterNames()
+	for _, charKey in ipairs(characters) do
+		local charInfo = CharacterData.GetCharacter(charKey)
+		local card = Instance.new("TextButton")
+		card.Name = "Card_" .. charKey
+		card.Size = UDim2.new(0, 150, 0, 280)
+		card.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+		card.BorderSizePixel = 0
+		card.Text = ""
+		card.Parent = cardsFrame
+		Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
+
+		local accent = Instance.new("Frame")
+		accent.Size = UDim2.new(1, 0, 0, 6)
+		accent.BackgroundColor3 = charInfo.Colors.Primary
+		accent.BorderSizePixel = 0
+		accent.Parent = card
+		Instance.new("UICorner", accent).CornerRadius = UDim.new(0, 10)
+
+		local charBody = Instance.new("Frame")
+		charBody.Size = UDim2.new(0, 50, 0, 80)
+		charBody.Position = UDim2.new(0.5, -25, 0.08, 0)
+		charBody.BackgroundColor3 = charInfo.BodyColor
+		charBody.BorderSizePixel = 0
+		charBody.Parent = card
+		Instance.new("UICorner", charBody).CornerRadius = UDim.new(0, 5)
+
+		local headFrame = Instance.new("Frame")
+		headFrame.Size = UDim2.new(0, 30, 0, 30)
+		headFrame.Position = UDim2.new(0.5, -15, 0.02, 0)
+		headFrame.BackgroundColor3 = Color3.fromRGB(245, 205, 170)
+		headFrame.BorderSizePixel = 0
+		headFrame.Parent = card
+		Instance.new("UICorner", headFrame).CornerRadius = UDim.new(1, 0)
+
+		local nameLabel = Instance.new("TextLabel")
+		nameLabel.Size = UDim2.new(0.9, 0, 0, 22)
+		nameLabel.Position = UDim2.new(0.05, 0, 0.42, 0)
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.Text = charInfo.DisplayName
+		nameLabel.TextColor3 = charInfo.Colors.Primary
+		nameLabel.TextScaled = true
+		nameLabel.Font = Enum.Font.GothamBold
+		nameLabel.Parent = card
+
+		local descLabel = Instance.new("TextLabel")
+		descLabel.Size = UDim2.new(0.85, 0, 0, 40)
+		descLabel.Position = UDim2.new(0.075, 0, 0.52, 0)
+		descLabel.BackgroundTransparency = 1
+		descLabel.Text = charInfo.Description
+		descLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+		descLabel.TextScaled = true
+		descLabel.Font = Enum.Font.Gotham
+		descLabel.TextWrapped = true
+		descLabel.Parent = card
+
+		local tierLabel = Instance.new("TextLabel")
+		tierLabel.Size = UDim2.new(0.5, 0, 0, 18)
+		tierLabel.Position = UDim2.new(0.25, 0, 0.85, 0)
+		tierLabel.BackgroundColor3 = Color3.fromRGB(60, 160, 60)
+		tierLabel.Text = charInfo.Tier or "Free"
+		tierLabel.TextColor3 = Color3.new(1, 1, 1)
+		tierLabel.TextScaled = true
+		tierLabel.Font = Enum.Font.GothamBold
+		tierLabel.Parent = card
+		Instance.new("UICorner", tierLabel).CornerRadius = UDim.new(0, 4)
+
+		card.MouseButton1Click:Connect(function()
+			Remotes.Game.SelectCharacter:FireServer(charKey)
+		end)
+
+		card.MouseEnter:Connect(function()
+			TweenService:Create(card, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(50, 50, 60) }):Play()
+		end)
+		card.MouseLeave:Connect(function()
+			TweenService:Create(card, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(35, 35, 40) }):Play()
+		end)
+	end
+
+	return selectGui
+end
+
+--------------------------------------------------------------------------------
+-- HUD UPDATES
 --------------------------------------------------------------------------------
 
 local hud = createHUD()
+local charSelectUI = createCharacterSelectUI()
 
 local function getElement(name)
 	return hud:FindFirstChild(name, true)
 end
 
--- Health bar update
-local function updateHealthBar(targetPlayer, current, max)
-	local fraction = math.clamp(current / max, 0, 1)
+local function showAnnouncement(text, duration, color)
+	local label = getElement("Announcement")
+	if label then
+		label.Text = text
+		label.TextColor3 = color or Color3.new(1, 1, 1)
+		label.Visible = true
+		task.delay(duration or 2, function()
+			if label and label.Text == text then label.Visible = false end
+		end)
+	end
+end
 
+local function addKillFeedEntry(attackerName, victimName)
+	local feedFrame = getElement("KillFeedFrame")
+	if not feedFrame then return end
+
+	local entry = Instance.new("TextLabel")
+	entry.Size = UDim2.new(1, 0, 0, 20)
+	entry.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	entry.BackgroundTransparency = 0.5
+	entry.Text = attackerName .. " eliminated " .. victimName
+	entry.TextColor3 = Color3.fromRGB(255, 200, 200)
+	entry.TextScaled = true
+	entry.Font = Enum.Font.GothamBold
+	entry.TextXAlignment = Enum.TextXAlignment.Right
+	entry.Parent = feedFrame
+	Instance.new("UICorner", entry).CornerRadius = UDim.new(0, 4)
+
+	task.delay(3, function()
+		if entry and entry.Parent then
+			TweenService:Create(entry, TweenInfo.new(1), { BackgroundTransparency = 1, TextTransparency = 1 }):Play()
+			task.delay(1.1, function() if entry and entry.Parent then entry:Destroy() end end)
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- REMOTES
+--------------------------------------------------------------------------------
+
+Remotes.Combat.HealthUpdate.OnClientEvent:Connect(function(targetPlayer, current, max)
 	if targetPlayer == player then
+		local fraction = math.clamp(current / max, 0, 1)
 		local bar = getElement("HealthBar")
 		if bar and bar.Parent and bar.Parent.Name == "HealthFrame" then
 			bar.Size = UDim2.new(fraction, 0, 1, 0)
-			-- Color shifts from green to red
-			local r = math.floor(255 * (1 - fraction))
-			local g = math.floor(200 * fraction)
-			bar.BackgroundColor3 = Color3.fromRGB(r, g, 50)
+			bar.BackgroundColor3 = Color3.fromRGB(math.floor(255 * (1 - fraction)), math.floor(200 * fraction), 50)
 		end
 		local label = getElement("HealthLabel")
-		if label then
-			label.Text = math.floor(current) .. " / " .. max
-		end
-	else
-		-- Opponent health bar
-		local oppFrame = getElement("OpponentHealthFrame")
-		if oppFrame then
-			oppFrame.Visible = true
-			local oppBar = oppFrame:FindFirstChild("HealthBar")
-			if oppBar then
-				oppBar.Size = UDim2.new(fraction, 0, 1, 0)
-			end
-		end
+		if label then label.Text = math.floor(current) .. " / " .. max end
 	end
-end
+end)
 
--- Stamina bar update
-local function updateStaminaBar(current, max)
+Remotes.Combat.StaminaUpdate.OnClientEvent:Connect(function(current, max)
 	local bar = getElement("StaminaBar")
-	if bar then
-		bar.Size = UDim2.new(math.clamp(current / max, 0, 1), 0, 1, 0)
-	end
-end
+	if bar then bar.Size = UDim2.new(math.clamp(current / max, 0, 1), 0, 1, 0) end
+end)
 
--- Ultimate meter update
-local function updateUltimateMeter(current, max)
-	local bar = getElement("UltBar")
-	if bar then
-		bar.Size = UDim2.new(math.clamp(current / max, 0, 1), 0, 1, 0)
-	end
-	-- Glow effect when full
-	local ultLabel = getElement("UltLabel")
-	if ultLabel then
+Remotes.Combat.AwakeningUpdate.OnClientEvent:Connect(function(current, max)
+	local bar = getElement("AwakeBar")
+	if bar then bar.Size = UDim2.new(math.clamp(current / max, 0, 1), 0, 1, 0) end
+	local label = getElement("AwakeLabel")
+	if label then
 		if current >= max then
-			ultLabel.Text = "ULTIMATE READY!"
-			ultLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+			label.Text = "AWAKENING READY! [G]"
+			label.TextColor3 = Color3.fromRGB(255, 240, 100)
 		else
-			ultLabel.Text = "ULTIMATE"
-			ultLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+			label.Text = "AWAKENING [G]"
+			label.TextColor3 = Color3.fromRGB(255, 150, 50)
 		end
 	end
-end
+end)
 
--- Ability cooldown update
-local function startCooldownVisual(slot, duration)
+Remotes.Combat.CooldownStart.OnClientEvent:Connect(function(slot, duration)
 	local slotFrame = getElement("Slot_" .. slot)
 	if not slotFrame then return end
-
 	local overlay = slotFrame:FindFirstChild("CooldownOverlay")
 	local cdLabel = slotFrame:FindFirstChild("CooldownLabel")
 	if not overlay or not cdLabel then return end
-
-	-- Show overlay
 	overlay.BackgroundTransparency = 0.6
-
-	-- Countdown timer
 	task.spawn(function()
 		local endTime = os.clock() + duration
 		while os.clock() < endTime do
-			local remaining = math.ceil(endTime - os.clock())
-			cdLabel.Text = tostring(remaining)
+			cdLabel.Text = tostring(math.ceil(endTime - os.clock()))
 			task.wait(0.1)
 		end
 		cdLabel.Text = ""
 		overlay.BackgroundTransparency = 1
 	end)
-end
-
--- Announcement display
-local function showAnnouncement(text, duration)
-	local label = getElement("Announcement")
-	if label then
-		label.Text = text
-		label.Visible = true
-		task.delay(duration or 2, function()
-			if label then
-				label.Visible = false
-			end
-		end)
-	end
-end
-
---------------------------------------------------------------------------------
--- CONNECT REMOTES TO UI
---------------------------------------------------------------------------------
-
-Remotes.Combat.HealthUpdate.OnClientEvent:Connect(function(targetPlayer, current, max)
-	updateHealthBar(targetPlayer, current, max)
 end)
 
-Remotes.Combat.StaminaUpdate.OnClientEvent:Connect(function(current, max)
-	updateStaminaBar(current, max)
-end)
-
-Remotes.Combat.UltimateUpdate.OnClientEvent:Connect(function(current, max)
-	updateUltimateMeter(current, max)
-end)
-
-Remotes.Combat.CooldownStart.OnClientEvent:Connect(function(slot, duration)
-	startCooldownVisual(slot, duration)
-end)
-
--- Ragdoll indicator
-Remotes.Combat.Ragdoll.OnClientEvent:Connect(function(victim, ragdolled, duration)
+Remotes.Combat.Ragdoll.OnClientEvent:Connect(function(victim, ragdolled)
 	if victim == player then
 		local label = getElement("RagdollLabel")
-		if label then
-			label.Visible = ragdolled
-		end
+		if label then label.Visible = ragdolled end
 	end
 end)
 
--- Perfect block → show critical indicator
 Remotes.Combat.PerfectBlock.OnClientEvent:Connect(function(blocker)
 	if blocker == player then
 		local label = getElement("CriticalLabel")
-		if label then
-			label.Visible = true
-			label.Text = "CRITICAL HIT READY!"
-			label.TextColor3 = Color3.fromRGB(255, 240, 100)
-		end
-
-		-- Flash the screen briefly
-		local announcement = getElement("Announcement")
-		if announcement then
-			announcement.Text = "PERFECT BLOCK!"
-			announcement.TextColor3 = Color3.fromRGB(200, 220, 255)
-			announcement.Visible = true
-			task.delay(0.8, function()
-				if announcement and announcement.Text == "PERFECT BLOCK!" then
-					announcement.Visible = false
-					announcement.TextColor3 = Color3.fromRGB(255, 255, 255)
-				end
-			end)
-		end
+		if label then label.Visible = true end
+		showAnnouncement("PERFECT BLOCK!", 0.8, Color3.fromRGB(200, 220, 255))
 	end
 end)
 
--- Critical hit / Black Flash notification
-Remotes.Combat.CriticalHit.OnClientEvent:Connect(function(attacker, hitType)
+Remotes.Combat.CriticalHit.OnClientEvent:Connect(function(attacker)
 	if attacker == player then
-		-- We used our critical, hide the indicator
 		local label = getElement("CriticalLabel")
-		if label then
-			label.Visible = false
-		end
+		if label then label.Visible = false end
 	end
 end)
 
--- Match events
-Remotes.Match.MatchFound.OnClientEvent:Connect(function(opponentName, opponentNinja)
-	waitingForPractice = false
-	local queueButton = getElement("QueueButton")
-	if queueButton then queueButton.Visible = false end
-	local practiceButton = getElement("PracticeButton")
-	if practiceButton then practiceButton.Visible = false end
-	showAnnouncement("VS " .. opponentName, 2)
-end)
-
-Remotes.Match.RoundStart.OnClientEvent:Connect(function(roundNum, countdown)
-	if countdown > 0 then
-		showAnnouncement(tostring(countdown), 0.9)
-	else
-		showAnnouncement("FIGHT!", 1.5)
+Remotes.Combat.AwakeningState.OnClientEvent:Connect(function(targetPlayer, activated, name)
+	if targetPlayer == player and activated then
+		showAnnouncement(name or "AWAKENED!", 2, Color3.fromRGB(255, 215, 0))
 	end
 end)
 
-Remotes.Match.RoundEnd.OnClientEvent:Connect(function(winnerName, myScore, opponentScore)
-	local scoreLabel = getElement("ScoreLabel")
-	if scoreLabel then
-		scoreLabel.Text = "You: " .. myScore .. " - " .. opponentScore
-	end
-	showAnnouncement(winnerName .. " wins the round!", 2)
+Remotes.Game.CharacterConfirmed.OnClientEvent:Connect(function()
+	if charSelectUI then charSelectUI.Enabled = false end
+	showAnnouncement("FIGHT!", 2, Color3.fromRGB(255, 80, 30))
 end)
 
-Remotes.Match.MatchEnd.OnClientEvent:Connect(function(winnerName)
-	showAnnouncement(winnerName .. " WINS THE MATCH!", 3)
-
-	-- Reset state so buttons work correctly after match
-	isQueued = false
-	waitingForPractice = false
-
-	-- Show buttons again after a delay
-	task.delay(4, function()
-		local queueBtn = getElement("QueueButton")
-		if queueBtn then
-			queueBtn.Visible = true
-			queueBtn.Text = "FIND MATCH"
-			queueBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 60)
-		end
-		local practiceBtn = getElement("PracticeButton")
-		if practiceBtn then
-			practiceBtn.Visible = true
-			practiceBtn.Text = "PRACTICE vs BOT"
-			practiceBtn.BackgroundColor3 = Color3.fromRGB(60, 100, 200)
-		end
-		local oppFrame = getElement("OpponentHealthFrame")
-		if oppFrame then oppFrame.Visible = false end
-		local scoreLabel = getElement("ScoreLabel")
-		if scoreLabel then scoreLabel.Text = "Round: 0 - 0" end
-	end)
+Remotes.Game.KillFeed.OnClientEvent:Connect(function(attackerName, victimName)
+	addKillFeedEntry(attackerName, victimName)
 end)
 
-Remotes.Match.QueueStatus.OnClientEvent:Connect(function(status, queueSize)
-	local queueButton = getElement("QueueButton")
-	if queueButton then
-		if status == "queued" then
-			queueButton.Text = "SEARCHING... (" .. queueSize .. ")"
-			queueButton.BackgroundColor3 = Color3.fromRGB(200, 160, 40)
-		elseif status == "left" then
-			queueButton.Text = "FIND MATCH"
-			queueButton.BackgroundColor3 = Color3.fromRGB(60, 160, 60)
-		end
+Remotes.Game.RespawnTimer.OnClientEvent:Connect(function(seconds)
+	local label = getElement("RespawnLabel")
+	if label then label.Visible = true; label.Text = "Respawning in " .. seconds .. "..." end
+end)
+
+Remotes.Game.Respawned.OnClientEvent:Connect(function()
+	local label = getElement("RespawnLabel")
+	if label then label.Visible = false end
+end)
+
+Remotes.Game.PlayerDied.OnClientEvent:Connect(function(attacker, victim)
+	if victim == player then
+		showAnnouncement("ELIMINATED", 2, Color3.fromRGB(255, 50, 50))
 	end
 end)
 
---------------------------------------------------------------------------------
--- QUEUE BUTTON INTERACTION
---------------------------------------------------------------------------------
-
-local isQueued = false
-
-local queueButton = getElement("QueueButton")
-if queueButton then
-	queueButton.MouseButton1Click:Connect(function()
-		if not isQueued then
-			isQueued = true
-			Remotes.Match.JoinQueue:FireServer()
-		else
-			isQueued = false
-			Remotes.Match.LeaveQueue:FireServer()
-		end
-	end)
-end
-
---------------------------------------------------------------------------------
--- PRACTICE BUTTON INTERACTION
---------------------------------------------------------------------------------
-
-local waitingForPractice = false
-
-local practiceButton = getElement("PracticeButton")
-if practiceButton then
-	practiceButton.MouseButton1Click:Connect(function()
-		if waitingForPractice then return end
-		waitingForPractice = true
-
-		practiceButton.Text = "STARTING..."
-		practiceButton.BackgroundColor3 = Color3.fromRGB(120, 120, 120)
-		if queueButton then queueButton.Visible = false end
-		Remotes.Match.StartPractice:FireServer()
-
-		-- Safety timeout: restore buttons if match doesn't start within 10 seconds
-		task.delay(10, function()
-			if waitingForPractice then
-				waitingForPractice = false
-				if practiceButton then
-					practiceButton.Text = "PRACTICE vs BOT"
-					practiceButton.BackgroundColor3 = Color3.fromRGB(60, 100, 200)
-					practiceButton.Visible = true
-				end
-				if queueButton then
-					queueButton.Visible = true
-				end
-			end
-		end)
-	end)
-end
-
-print("[UIController] Loaded")
+print("[UIController] Loaded - TSB-style HUD")

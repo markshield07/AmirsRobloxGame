@@ -1,24 +1,39 @@
 --[[
-	CombatAPI (Shared ModuleScript)
-	Bridge between CombatHandler and MatchManager.
-	CombatHandler registers its functions here; MatchManager calls them.
-	This eliminates the _G race condition.
+	CombatAPI
+	Shared interface between server modules (CombatHandler, GameManager, BotManager).
+	Functions are registered at runtime by the owning module.
 ]]
 
 local CombatAPI = {}
 
--- These get set by CombatHandler when it loads
-CombatAPI.InitPlayerCombat = nil   -- function(player, ninjaKey)
-CombatAPI.ResetPlayerCombat = nil  -- function(player)
-CombatAPI.RemovePlayerCombat = nil -- function(player)
-CombatAPI.SetPlayerMatchId = nil   -- function(player, matchId)
+-- Registered by CombatHandler:
+-- CombatAPI.InitPlayerCombat(player, characterKey)
+-- CombatAPI.ResetPlayerCombat(player)
+-- CombatAPI.RemovePlayerCombat(player)
+-- CombatAPI.GetPlayerState(player)
 
--- Flag so MatchManager can wait until CombatHandler has registered
-CombatAPI.IsReady = false
+-- Bot combat functions (registered by CombatHandler):
+-- CombatAPI.BotAttack(botPlayer)
+-- CombatAPI.BotUseMove(botPlayer, slot)
+-- CombatAPI.BotBlock(botPlayer, blocking)
+-- CombatAPI.BotDash(botPlayer, direction, dashType)
+-- CombatAPI.BotEvasive(botPlayer, direction)
 
--- Wait until CombatHandler has registered its functions
+-- Registered by BotManager:
+-- CombatAPI.SpawnBot(characterKey, position) → BotPlayer
+-- CombatAPI.DestroyBot(botPlayer)
+-- CombatAPI.StartBotAI(botPlayer, humanPlayer)
+-- CombatAPI.StopBotAI(botPlayer)
+
+-- Ready flag
+CombatAPI._ready = false
+
+function CombatAPI.MarkReady()
+	CombatAPI._ready = true
+end
+
 function CombatAPI.WaitForReady()
-	while not CombatAPI.IsReady do
+	while not CombatAPI._ready do
 		task.wait(0.1)
 	end
 end

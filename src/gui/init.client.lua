@@ -1,12 +1,11 @@
 --[[
 	GUI Init (Client)
 	Placeholder for additional GUI setup.
-	Main HUD is created by UIController.
+	Main HUD and character selection are created by UIController.
 	This file can be used for:
-	- Character selection screen
 	- Settings menu
-	- Rank display
+	- Kill leaderboard
+	- Chat customization
 ]]
 
--- Character selection will be added here in a future phase
-print("[GameUI] Ready")
+print("[GameUI] Ready — The Strongest Battlegrounds")

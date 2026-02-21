@@ -1,7 +1,8 @@
 --[[
 	SoundBank
 	TSB-style sound management. Progressive M1 impact weight,
-	critical hit crack, perfect block cue, ragdoll thuds.
+	critical hit crack, perfect block cue, ragdoll thuds,
+	character ability sounds, evasive/awakening cues.
 ]]
 
 local SoundService = game:GetService("SoundService")
@@ -18,20 +19,20 @@ SoundBank.Sounds = {
 	M1Swing1 = { Id = "rbxassetid://12222216", Volume = 0.5, Pitch = 1.15 },
 	M1Swing2 = { Id = "rbxassetid://12222216", Volume = 0.55, Pitch = 1.1 },
 	M1Swing3 = { Id = "rbxassetid://12222216", Volume = 0.6, Pitch = 1.0 },
-	M1Swing4 = { Id = "rbxassetid://12222216", Volume = 0.7, Pitch = 0.8 },  -- heavy finisher
+	M1Swing4 = { Id = "rbxassetid://12222216", Volume = 0.7, Pitch = 0.8 },
 
-	-- Hit impacts (progressive weight — light to heavy)
+	-- Hit impacts (progressive weight)
 	HitLight    = { Id = "rbxassetid://12222225", Volume = 0.6, Pitch = 1.15 },
 	HitMedium   = { Id = "rbxassetid://12222225", Volume = 0.7, Pitch = 1.0 },
 	HitHeavy    = { Id = "rbxassetid://12222225", Volume = 0.85, Pitch = 0.75 },
-	HitFinisher = { Id = "rbxassetid://12222225", Volume = 0.9, Pitch = 0.65 },  -- 4th hit slam
+	HitFinisher = { Id = "rbxassetid://12222225", Volume = 0.9, Pitch = 0.65 },
 
 	-- Critical / Black Flash
-	CriticalHit = { Id = "rbxassetid://12222084", Volume = 0.85, Pitch = 1.4 },  -- sharp crack
-	BlackFlash  = { Id = "rbxassetid://12222084", Volume = 1.0, Pitch = 0.6 },   -- deep boom
+	CriticalHit = { Id = "rbxassetid://12222084", Volume = 0.85, Pitch = 1.4 },
+	BlackFlash  = { Id = "rbxassetid://12222084", Volume = 1.0, Pitch = 0.6 },
 
 	-- Perfect Block
-	PerfectBlock = { Id = "rbxassetid://12221984", Volume = 0.6, Pitch = 1.8 },  -- bright ding
+	PerfectBlock = { Id = "rbxassetid://12221984", Volume = 0.6, Pitch = 1.8 },
 	BlockBreak   = { Id = "rbxassetid://12222084", Volume = 0.7, Pitch = 1.2 },
 
 	-- Block
@@ -43,9 +44,12 @@ SoundBank.Sounds = {
 	ForwardDash    = { Id = "rbxassetid://12222216", Volume = 0.55, Pitch = 1.1 },
 	DashAttackHit  = { Id = "rbxassetid://12222225", Volume = 0.5, Pitch = 1.2 },
 
+	-- Evasive
+	EvasiveDodge = { Id = "rbxassetid://12222216", Volume = 0.5, Pitch = 1.5 },
+
 	-- Ragdoll
-	RagdollImpact = { Id = "rbxassetid://12222225", Volume = 0.7, Pitch = 0.6 },  -- ground thud
-	RagdollCancel = { Id = "rbxassetid://12222216", Volume = 0.4, Pitch = 1.6 },  -- recovery whoosh
+	RagdollImpact = { Id = "rbxassetid://12222225", Volume = 0.7, Pitch = 0.6 },
+	RagdollCancel = { Id = "rbxassetid://12222216", Volume = 0.4, Pitch = 1.6 },
 
 	-- Uppercut / Downslam
 	Uppercut    = { Id = "rbxassetid://12222216", Volume = 0.65, Pitch = 1.3 },
@@ -54,43 +58,61 @@ SoundBank.Sounds = {
 	-- Missed M1 (whiff)
 	M1Miss = { Id = "rbxassetid://12222216", Volume = 0.3, Pitch = 1.5 },
 
-	-- Fire abilities (FlameShadow)
-	FireDash    = { Id = "rbxassetid://12222216", Volume = 0.6, Pitch = 0.9 },
-	FireSlash   = { Id = "rbxassetid://12222216", Volume = 0.7, Pitch = 0.8 },
-	FireBomb    = { Id = "rbxassetid://12222084", Volume = 0.5, Pitch = 1.0 },
-	FireExplode = { Id = "rbxassetid://12222084", Volume = 0.8, Pitch = 0.7 },
-	FireUlt     = { Id = "rbxassetid://12222084", Volume = 0.9, Pitch = 0.6 },
+	-- Awakening
+	AwakeningActivate   = { Id = "rbxassetid://12222084", Volume = 0.9, Pitch = 0.7 },
+	AwakeningDeactivate = { Id = "rbxassetid://12222084", Volume = 0.5, Pitch = 1.2 },
 
-	-- Water abilities (MistBlade)
-	WaterStep  = { Id = "rbxassetid://12222216", Volume = 0.5, Pitch = 1.5 },
-	WaterSlice = { Id = "rbxassetid://12222216", Volume = 0.6, Pitch = 1.2 },
-	WaterMist  = { Id = "rbxassetid://12222216", Volume = 0.4, Pitch = 1.6 },
-	WaterUlt   = { Id = "rbxassetid://12222084", Volume = 0.8, Pitch = 0.9 },
+	-- Sprint
+	SprintStart = { Id = "rbxassetid://12222216", Volume = 0.3, Pitch = 1.3 },
 
-	-- Lightning abilities (StormFist)
-	ThunderJab    = { Id = "rbxassetid://12222084", Volume = 0.6, Pitch = 1.3 },
-	LightningBolt = { Id = "rbxassetid://12222084", Volume = 0.8, Pitch = 1.0 },
-	StaticField   = { Id = "rbxassetid://12222084", Volume = 0.5, Pitch = 1.5 },
-	StormUlt      = { Id = "rbxassetid://12222084", Volume = 1.0, Pitch = 0.6 },
-
-	-- Shadow abilities (ShadowFang)
-	ShadowStep   = { Id = "rbxassetid://12222216", Volume = 0.5, Pitch = 0.7 },
-	DarkSpike    = { Id = "rbxassetid://12222225", Volume = 0.6, Pitch = 0.8 },
-	CounterGuard = { Id = "rbxassetid://12221984", Volume = 0.5, Pitch = 0.7 },
-	ShadowUlt    = { Id = "rbxassetid://12222084", Volume = 0.9, Pitch = 0.5 },
+	-- Character ability sounds — generic categories
+	AbilityPunch    = { Id = "rbxassetid://12222225", Volume = 0.6, Pitch = 1.0 },
+	AbilitySlash    = { Id = "rbxassetid://12222216", Volume = 0.6, Pitch = 0.9 },
+	AbilityBlast    = { Id = "rbxassetid://12222084", Volume = 0.7, Pitch = 1.0 },
+	AbilityGrab     = { Id = "rbxassetid://12222225", Volume = 0.7, Pitch = 0.85 },
+	AbilityCounter  = { Id = "rbxassetid://12221984", Volume = 0.5, Pitch = 0.8 },
+	AbilityMultiHit = { Id = "rbxassetid://12222225", Volume = 0.6, Pitch = 1.1 },
+	AbilityHeavy    = { Id = "rbxassetid://12222084", Volume = 0.8, Pitch = 0.7 },
+	AbilityUltimate = { Id = "rbxassetid://12222084", Volume = 0.9, Pitch = 0.6 },
 
 	-- UI / Announcements
-	RoundStart = { Id = "rbxassetid://12222084", Volume = 0.5, Pitch = 1.0 },
-	MatchWin   = { Id = "rbxassetid://12222084", Volume = 0.6, Pitch = 1.2 },
 	KO         = { Id = "rbxassetid://12222084", Volume = 0.7, Pitch = 0.7 },
+	Respawn    = { Id = "rbxassetid://12222084", Volume = 0.5, Pitch = 1.0 },
+	CharSelect = { Id = "rbxassetid://12221984", Volume = 0.4, Pitch = 1.5 },
 }
 
--- Ability sound mapping
+-- Character ability sound mapping (E/R/T/G slots → sound keys)
 SoundBank.AbilitySounds = {
-	FlameShadow = { Q = "FireDash",   E = "FireSlash",   R = "FireBomb",    F = "FireUlt" },
-	MistBlade   = { Q = "WaterStep",  E = "WaterSlice",  R = "WaterMist",   F = "WaterUlt" },
-	StormFist   = { Q = "ThunderJab", E = "LightningBolt", R = "StaticField", F = "StormUlt" },
-	ShadowFang  = { Q = "ShadowStep", E = "DarkSpike",   R = "CounterGuard", F = "ShadowUlt" },
+	StrongestHero = {
+		E = "AbilityPunch",
+		R = "AbilityMultiHit",
+		T = "AbilityPunch",
+		G = "AbilityHeavy",
+	},
+	HeroHunter = {
+		E = "AbilityPunch",
+		R = "AbilityCounter",
+		T = "AbilityGrab",
+		G = "AbilityHeavy",
+	},
+	DestructiveCyborg = {
+		E = "AbilityBlast",
+		R = "AbilityMultiHit",
+		T = "AbilityHeavy",
+		G = "AbilityUltimate",
+	},
+	DeadlyNinja = {
+		E = "AbilitySlash",
+		R = "AbilityMultiHit",
+		T = "AbilityBlast",
+		G = "AbilityUltimate",
+	},
+	BladeMaster = {
+		E = "AbilitySlash",
+		R = "AbilitySlash",
+		T = "AbilityCounter",
+		G = "AbilityUltimate",
+	},
 }
 
 -- Hit sound for each combo index (escalating weight)
@@ -161,15 +183,14 @@ function SoundBank:playOnPart(soundName, part)
 	Debris:AddItem(sound, 5)
 end
 
-function SoundBank:getAbilitySound(ninjaKey, slot)
-	local ninjaMap = SoundBank.AbilitySounds[ninjaKey]
-	if ninjaMap then
-		return ninjaMap[slot]
+function SoundBank:getAbilitySound(characterKey, slot)
+	local charMap = SoundBank.AbilitySounds[characterKey]
+	if charMap then
+		return charMap[slot]
 	end
 	return nil
 end
 
--- Get the hit impact sound for a specific combo index
 function SoundBank:getM1HitSound(comboIndex)
 	return SoundBank.M1HitSounds[comboIndex] or "HitLight"
 end
